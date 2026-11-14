@@ -36,6 +36,7 @@ Options:
 | `--method gaussian\|pixelate` | `gaussian` | Blur style |
 | `--strength 1..3` | `3` | 1 = light, 3 = heavy |
 | `--min-size N` | `24` | Smallest face to detect, in pixels |
+| `--detector yunet\|haar` | `yunet` | Face detector (see below) |
 
 Example:
 
@@ -50,6 +51,13 @@ python blur_faces.py ./my_dataset ./my_dataset_blurred --method pixelate
 
 Supported formats: jpg, jpeg, png, bmp, webp, tif, tiff.
 
-## Limitations
+## Examples
 
-Detection uses OpenCV's built-in Haar cascades (frontal and profile faces). They can miss small, tilted, dark or partly hidden faces. If you need strict anonymization, review a sample of the output by hand.
+See [`examples/`](examples/): a sample dataset in `examples/input` and the blurred results in `examples/output` and `examples/output_pixelate`.
+
+## Detectors
+
+- **yunet** (default): [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet), a 230 KB neural network bundled in `models/` (MIT license). Handles tilted, turned and small faces well.
+- **haar**: OpenCV's older built-in cascades. No model file needed, but misses more faces and gives more false positives.
+
+No detector is perfect. If you need strict anonymization, review a sample of the output by hand.

@@ -16,13 +16,35 @@ import cv2
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 
-# Haar cascades ship with OpenCV, so no model download is needed.
+# YuNet: small (230 KB) neural face detector bundled in models/ (MIT license).
+YUNET_MODEL = Path(__file__).resolve().parent / "models" / "face_detection_yunet_2023mar.onnx"
+
+# Haar cascades ship with OpenCV; kept as a fallback (--detector haar).
 FRONTAL = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
 PROFILE = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
 
 
-def detect_faces(img, min_size=24):
+_yunet = None
+
+
+def detect_faces_yunet(img, min_size=24, score=0.6):
+    """Return a list of (x, y, w, h) face boxes using YuNet."""
+    global _yunet
+    h, w = img.shape[:2]
+    if _yunet is None:
+        _yunet = cv2.FaceDetectorYN.create(str(YUNET_MODEL), "", (w, h), score, 0.3, 5000)
+    _yunet.setInputSize((w, h))
+    _, faces = _yunet.detect(img)
+    if faces is None:
+        return []
+    return [tuple(int(v) for v in f[:4]) for f in faces if min(f[2], f[3]) >= min_size]
+
+
+def detect_faces(img, min_size=24, detector="yunet"):
     """Return a list of (x, y, w, h) face boxes."""
+    if detector == "yunet":
+        return detect_faces_yunet(img, min_size)
+
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     gray = cv2.equalizeHist(gray)
     kw = dict(scaleFactor=1.1, minNeighbors=5, minSize=(min_size, min_size))
@@ -61,7 +83,7 @@ def blur_region(img, box, method="gaussian", strength=3, pad=0.15):
         roi[:] = cv2.GaussianBlur(roi, (k, k), 0)
 
 
-def process_dataset(in_dir, out_dir, method, strength, min_size):
+def process_dataset(in_dir, out_dir, method, strength, min_size, detector="yunet"):
     in_dir, out_dir = Path(in_dir), Path(out_dir)
     files = sorted(p for p in in_dir.rglob("*") if p.suffix.lower() in IMAGE_EXTS)
     if not files:
@@ -80,7 +102,7 @@ def process_dataset(in_dir, out_dir, method, strength, min_size):
             report_rows.append((str(src), "error", 0))
             continue
 
-        faces = detect_faces(img, min_size)
+        faces = detect_faces(img, min_size, detector)
         for box in faces:
             blur_region(img, box, method, strength)
         cv2.imwrite(str(dst), img)
@@ -104,8 +126,13 @@ def main():
     ap.add_argument("--method", choices=["gaussian", "pixelate"], default="gaussian")
     ap.add_argument("--strength", type=int, default=3, help="1 (light) .. 3 (heavy)")
     ap.add_argument("--min-size", type=int, default=24, help="smallest face size in px")
+    ap.add_argument("--detector", choices=["yunet", "haar"], default="yunet",
+                    help="yunet = accurate (default), haar = older OpenCV cascades")
     args = ap.parse_args()
-    process_dataset(args.input_dir, args.output_dir, args.method, args.strength, args.min_size)
+    if args.detector == "yunet" and not YUNET_MODEL.exists():
+        sys.exit(f"Model not found: {YUNET_MODEL}  (or use --detector haar)")
+    process_dataset(args.input_dir, args.output_dir, args.method, args.strength,
+                    args.min_size, args.detector)
 
 
 if __name__ == "__main__":
