@@ -12,6 +12,17 @@ cd face-blur
 pip install -r requirements.txt
 ```
 
+## Windows quick start
+
+Double-click is not enough; give it a folder. Either drag your dataset folder onto `run.bat`, or run:
+
+```bat
+run.bat C:\path\to\dataset
+run.bat C:\path\to\dataset C:\path\to\output --method pixelate
+```
+
+On the first run `run.bat` sets everything up by itself: it finds Python (installing Python 3.12 with `winget` if it is missing), creates a private `.venv` folder next to the script and installs OpenCV into it. Later runs start straight away. If no output folder is given, results go to `DATASET_blurred`. Delete `.venv` to force a clean reinstall.
+
 ## Usage
 
 ```bash
