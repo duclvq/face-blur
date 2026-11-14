@@ -84,8 +84,15 @@ def blur_region(img, box, method="gaussian", strength=3, pad=0.15, shape="oval")
         small = cv2.resize(roi, (blocks, blocks), interpolation=cv2.INTER_LINEAR)
         blurred = cv2.resize(small, (roi.shape[1], roi.shape[0]), interpolation=cv2.INTER_NEAREST)
     else:
-        k = max(roi.shape[0], roi.shape[1]) // max(1, 4 - min(strength, 3)) | 1  # odd kernel
-        blurred = cv2.GaussianBlur(roi, (k, k), 0)
+        # Blur a downscaled copy and scale it back up: looks the same as a huge
+        # kernel on the full-size face, but stays fast on high-resolution photos.
+        rh, rw = roi.shape[:2]
+        scale = min(1.0, 64 / max(rh, rw))
+        small = cv2.resize(roi, (max(1, round(rw * scale)), max(1, round(rh * scale))),
+                           interpolation=cv2.INTER_AREA)
+        k = max(small.shape[:2]) // max(1, 4 - min(strength, 3)) | 1  # odd kernel
+        small = cv2.GaussianBlur(small, (k, k), 0)
+        blurred = cv2.resize(small, (rw, rh), interpolation=cv2.INTER_LINEAR)
 
     if shape == "oval":
         # Ellipse centred on the original face box, sized to the padded box.

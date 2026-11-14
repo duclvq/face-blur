@@ -60,6 +60,18 @@ Supported formats: jpg, jpeg, png, bmp, webp, tif, tiff.
 
 See [`examples/`](examples/): a sample dataset in `examples/input` and the blurred results in `examples/output` and `examples/output_pixelate`.
 
+## Performance
+
+Measured on an Apple M4 laptop (CPU only, no GPU needed):
+
+| Photo width | Face detection | Blurring 7 faces |
+|---|---|---|
+| 640 px | ~9 ms | ~14 ms |
+| 1920 px | ~56 ms | ~24 ms |
+| 4000 px | ~310 ms | ~100 ms |
+
+A batch of 200 photos (~1280 px, 850 faces) takes about 12 seconds including loading and saving, roughly 1,000 photos per minute. Older or low-power PCs will be slower.
+
 ## Detectors
 
 - **yunet** (default): [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet), a 230 KB neural network bundled in `models/` (MIT license). Handles tilted, turned and small faces well.
