@@ -36,6 +36,8 @@ Options:
 | `--method gaussian\|pixelate` | `gaussian` | Blur style |
 | `--strength 1..3` | `3` | 1 = light, 3 = heavy |
 | `--min-size N` | `24` | Smallest face to detect, in pixels |
+| `--shape oval\|rect` | `oval` | Blur an oval that follows the face, or the whole box |
+| `--pad N` | `0.15` | Margin around each face, as a fraction of its size (0 = tight) |
 | `--detector yunet\|haar` | `yunet` | Face detector (see below) |
 
 Example:
@@ -45,6 +47,9 @@ python blur_faces.py ./my_dataset ./my_dataset_blurred --method pixelate
 ```
 
 ## Output
+
+Your original images are never modified: results are always written to a separate `OUTPUT_DIR` (the script refuses to write into `INPUT_DIR`). If `OUTPUT_DIR` already has files with the same names, they are replaced.
+
 
 - `OUTPUT_DIR` mirrors the folder structure of `INPUT_DIR`. Every image is written out, and images without faces are unchanged.
 - `OUTPUT_DIR/blur_report.csv` lists how many faces were found in each file and any files that could not be read.
