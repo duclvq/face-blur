@@ -2,8 +2,9 @@
 """Detect faces in a video (or every video of a folder) and blur them.
 
 Usage:
-    python blur_video.py INPUT OUTPUT [--method gaussian|pixelate] [--strength N]
-                         [--detect-every N] [--hold N]
+    python blur_video.py INPUT OUTPUT [--model raccoon_s|raccoon_l|yunet]
+                         [--method gaussian|pixelate] [--strength N]
+                         [--analysis-fps N] [--detect-every N] [--hold N]
 
 INPUT is one video file or a folder of videos. For a folder, its structure is
 mirrored into the OUTPUT folder. For a single file, OUTPUT is the output file
@@ -32,8 +33,8 @@ from pathlib import Path
 
 import cv2
 
-from blur_faces import (COVERAGE_WARN, YUNET_MODEL, blur_region, blurred_fraction,
-                        detect_faces, use_gpu)
+from blur_faces import (COVERAGE_WARN, DEFAULT_MODEL, MODELS, YUNET_MODEL, blur_region,
+                        blurred_fraction, detect_faces, gpu_message, use_gpu)
 
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
 
@@ -70,6 +71,54 @@ def update_tracks(tracks, detected, frame_idx, hold):
     kept = [t for t in tracks
             if frame_idx - t[1] <= hold and not any(_same_face(t[0], d) for d in detected)]
     return [[d, frame_idx] for d in detected] + kept
+
+
+# --------------------------------------------------------------------------- privateframe
+
+def analyze_privateframe(src, opts):
+    """Find face boxes for every frame with InsightFace PrivateFrame.
+
+    PrivateFrame detects faces with SCRFD, tracks them across frames, fills
+    gaps (optical flow, forward and backward) and smooths the boxes. Only its
+    analysis is used; blurring and encoding stay ours, so the output keeps the
+    source format. Returns (meta, {frame_idx: [(x, y, w, h), ...]}).
+    """
+    try:
+        from insightface.app.privateframe import analyze_streaming_pipeline
+        from insightface.app.privateframe.base_config import DEFAULT_CONFIG_PATH
+    except ImportError:
+        sys.exit(f"--model {opts.model} needs InsightFace: pip install -r requirements.txt\n"
+                 "(or use --model yunet, which needs only OpenCV)")
+    state = {"stage": None, "t": 0.0}
+    tty = sys.stdout.isatty()
+
+    def progress(cur, total, stage):
+        now = time.time()
+        if stage != state["stage"] or (tty and now - state["t"] > 0.5):
+            state.update(stage=stage, t=now)
+            pct = f" {100 * cur // total}%" if total else ""
+            end = "" if tty else "\n"
+            print(f"\r  analyzing ({stage}){pct}      ", end=end, flush=True)
+
+    with tempfile.TemporaryDirectory(prefix="faceblur_") as tmp:
+        result = Path(tmp) / "result.json"
+        analyze_streaming_pipeline(
+            config_path=DEFAULT_CONFIG_PATH, input_path=str(src),
+            workdir=str(Path(tmp) / "work"), result_path=str(result),
+            config_overrides={"models.name": opts.model,
+                              "scan.max_analysis_fps": opts.analysis_fps,
+                              "runtime.provider": "CPUExecutionProvider" if opts.cpu else "auto"},
+            progress=progress)
+        doc = json.loads(result.read_text())
+    print("\r" + " " * 60 + "\r", end="")
+    meta = doc["source_video"]["metadata"]
+    boxes = {}
+    for ob in doc["observations"]:
+        x0, y0, x1, y1 = ob["box"]
+        b = (int(x0), int(y0), int(round(x1 - x0)), int(round(y1 - y0)))
+        if min(b[2], b[3]) >= opts.min_size:
+            boxes.setdefault(ob["frame_idx"], []).append(b)
+    return meta, boxes
 
 
 # --------------------------------------------------------------------------- writers
@@ -388,8 +437,12 @@ def _blur_and_write(q, writer, opts, stats, stop, errors):
         stop.set()
 
 
-def run_pipeline(cap, first, writer, opts, expected, t0):
-    """Blur every frame of cap into writer. Returns the stats dict."""
+def run_pipeline(cap, first, writer, opts, expected, t0, known_boxes=None):
+    """Blur every frame of cap into writer. Returns the stats dict.
+
+    known_boxes -- {frame_idx: boxes} from analyze_privateframe; when given,
+    no detection runs here.
+    """
     stats = dict(frames=0, written=0, blurred=0, max_faces=0,
                  cov_sum=0.0, cov_max=0.0, cov_over=0)
     stop, errors = threading.Event(), []
@@ -405,11 +458,16 @@ def run_pipeline(cap, first, writer, opts, expected, t0):
             frame = _get(q_read, stop)
             if frame is _END:
                 break
-            if n % opts.detect_every == 0:
-                faces = detect_faces(frame, opts.min_size)
-                stats["max_faces"] = max(stats["max_faces"], len(faces))
-                tracks = update_tracks(tracks, faces, n, opts.hold)
-            if not _put(q_write, (frame, [box for box, _ in tracks]), stop):
+            if known_boxes is not None:
+                boxes = known_boxes.get(n, [])
+                stats["max_faces"] = max(stats["max_faces"], len(boxes))
+            else:
+                if n % opts.detect_every == 0:
+                    faces = detect_faces(frame, opts.min_size)
+                    stats["max_faces"] = max(stats["max_faces"], len(faces))
+                    tracks = update_tracks(tracks, faces, n, opts.hold)
+                boxes = [box for box, _ in tracks]
+            if not _put(q_write, (frame, boxes), stop):
                 break
             n += 1
             if tty and time.time() - last_print > 0.5:
@@ -455,6 +513,33 @@ def process_video(src, dst, opts, use_ffmpeg, label):
     row.update(fps=round(fps, 3), width=w, height=h)
     print(f"  {w}x{h} @ {fps:.3f} fps" + (f", ~{expected} frames" if expected > 0 else ""))
 
+    t_start = time.time()
+    known_boxes = None
+    if opts.model != "yunet":
+        try:
+            meta, known_boxes = analyze_privateframe(src, opts)
+        except (Exception, KeyboardInterrupt) as e:
+            cap.release()
+            if isinstance(e, KeyboardInterrupt):
+                raise
+            row["note"] = f"analysis failed: {e}"
+            print(f"\n  ERROR: analysis failed: {e}")
+            return row
+        if (meta.get("width"), meta.get("height")) != (w, h):
+            # E.g. rotation metadata applied by one decoder and not the other:
+            # the boxes would not line up, so detect frame by frame instead.
+            msg = (f"PrivateFrame saw {meta.get('width')}x{meta.get('height')}, OpenCV {w}x{h}; "
+                   f"detected frame by frame instead (no tracking)")
+            print(f"  WARNING: {msg}")
+            row["note"] = "; ".join(filter(None, [row["note"], msg]))
+            import blur_faces
+            if blur_faces._raccoon is None:
+                blur_faces.use_model(opts.model, opts.cpu)
+            known_boxes = None
+        else:
+            print(f"  analysis: {sum(map(len, known_boxes.values()))} face boxes in "
+                  f"{len(known_boxes)} frames, {time.time() - t_start:.1f} s")
+
     dst.parent.mkdir(parents=True, exist_ok=True)
     # Write to a temporary name so an interrupted run never leaves a
     # half-written file that looks finished.
@@ -463,7 +548,7 @@ def process_video(src, dst, opts, use_ffmpeg, label):
     try:
         if use_ffmpeg:
             info = probe_video(src)
-            writer = FfmpegWriter(tmp, src, (w, h), fps, info, opts.gpu)
+            writer = FfmpegWriter(tmp, src, (w, h), fps, info, not opts.cpu)
             src_codec = info.get("codec_name", "?")
         else:
             fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
@@ -475,7 +560,7 @@ def process_video(src, dst, opts, use_ffmpeg, label):
             row["note"] = "; ".join(filter(None, [row["note"], writer.note]))
             print(f"  WARNING: {writer.note}")
         t0 = time.time()
-        st = run_pipeline(cap, frame, writer, opts, expected, t0)
+        st = run_pipeline(cap, frame, writer, opts, expected, t0, known_boxes)
         writer.close()
         writer = None
         tmp.replace(dst)
@@ -501,7 +586,7 @@ def process_video(src, dst, opts, use_ffmpeg, label):
     row.update(status="ok", frames=n, frames_blurred=blurred, max_faces=max_faces,
                max_blurred_pct=round(cov_max * 100, 1),
                mean_blurred_pct=round(st["cov_sum"] / max(n, 1) * 100, 1))
-    secs = time.time() - t0
+    secs = time.time() - t_start
     print(f"\r  done: {n} frames, faces blurred in {blurred}, max {max_faces} per frame, "
           f"codec {row['video_codec']} ({row['encoder']}), audio {row['audio']}, {secs:.1f} s ({n / max(secs, 1e-9):.1f} fps)")
     if cov_over:
@@ -557,32 +642,48 @@ def main():
     ap.add_argument("--method", choices=["gaussian", "pixelate"], default="gaussian")
     ap.add_argument("--strength", type=int, choices=[1, 2, 3], default=3,
                     help="1 (light) .. 3 (heavy)")
-    ap.add_argument("--min-size", type=int, default=24, help="smallest face size in px")
+    ap.add_argument("--model", choices=MODELS, default=DEFAULT_MODEL,
+                    help="face detector: raccoon_s (default; InsightFace PrivateFrame with "
+                         "tracking), raccoon_l (larger), or yunet (small and fast, for "
+                         "low-end machines)")
+    ap.add_argument("--analysis-fps", type=float, default=15, metavar="N",
+                    help="raccoon models: full face scans per second of video (default 15; "
+                         "use 30 for fast motion, or the video's frame rate to scan every frame)")
+    ap.add_argument("--min-size", type=int, default=None,
+                    help="smallest face size in px (default: 24 for yunet, no limit otherwise)")
     ap.add_argument("--pad", type=float, default=0.15,
                     help="margin around each face as a fraction of its size, 0..1 (0 = tight)")
     ap.add_argument("--shape", choices=["rect", "oval"], default="oval",
                     help="blur the whole box or an oval that follows the face")
     ap.add_argument("--detect-every", type=int, default=1, metavar="N",
-                    help="run face detection every N frames and reuse the boxes in "
+                    help="yunet: run face detection every N frames and reuse the boxes in "
                          "between (faster, but fast-moving faces can slip out)")
     ap.add_argument("--hold", type=int, default=10, metavar="N",
-                    help="keep blurring a face for N frames after the detector "
+                    help="yunet: keep blurring a face for N frames after the detector "
                          "loses it, to avoid flicker (0 = off)")
-    ap.add_argument("--gpu", action="store_true",
-                    help="use an NVIDIA GPU: face detection with onnxruntime CUDA, and "
-                         "NVENC encoding for H.264/HEVC/AV1 sources")
+    ap.add_argument("--cpu", action="store_true",
+                    help="do not use a GPU (by default face detection and, for H.264/HEVC/AV1, "
+                         "encoding use an NVIDIA GPU or Apple GPU when available)")
+    ap.add_argument("--gpu", action="store_true", help=argparse.SUPPRESS)  # now the default
     args = ap.parse_args()
     if not 0 <= args.pad <= 1:
         ap.error(f"--pad is a fraction of the face size between 0 and 1, not pixels "
                  f"(got {args.pad}; 0.15 adds a 15% margin). Large values blur the whole frame.")
-    if args.detect_every < 1 or args.hold < 0:
-        ap.error("--detect-every must be >= 1 and --hold >= 0")
+    if args.detect_every < 1 or args.hold < 0 or args.analysis_fps <= 0:
+        ap.error("--detect-every must be >= 1, --hold >= 0 and --analysis-fps > 0")
+    if args.min_size is None:
+        args.min_size = 24 if args.model == "yunet" else 0
     if not YUNET_MODEL.exists():
         sys.exit(f"Model not found: {YUNET_MODEL}")
 
     jobs, report_path = plan_jobs(args.input, args.output)
-    if args.gpu:
-        print(use_gpu())
+    if args.model == "yunet":
+        print("Face detector: YuNet (OpenCV)")
+        if not args.cpu:
+            print(gpu_message(use_gpu()))
+    else:
+        dev = "CPU only" if args.cpu else "GPU when available, else CPU"
+        print(f"Face detector: {args.model} (InsightFace PrivateFrame: SCRFD + tracking; {dev})")
     use_ffmpeg = shutil.which("ffmpeg") is not None
     if not use_ffmpeg:
         print("WARNING: ffmpeg not found on PATH. Output videos will have NO AUDIO.\n"

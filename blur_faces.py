@@ -2,7 +2,8 @@
 """Detect faces in every image of a dataset folder and blur them.
 
 Usage:
-    python blur_faces.py INPUT_DIR OUTPUT_DIR [--method gaussian|pixelate] [--strength N]
+    python blur_faces.py INPUT_DIR OUTPUT_DIR [--model raccoon_s|raccoon_l|yunet]
+                         [--method gaussian|pixelate] [--strength N]
 
 The folder structure of INPUT_DIR is mirrored into OUTPUT_DIR.
 Images with no detected faces are copied unchanged.
@@ -23,7 +24,7 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 YUNET_MODEL = Path(__file__).resolve().parent / "models" / "face_detection_yunet_2023mar.onnx"
 # The same network with a free input size, for onnxruntime (GPU path).
 YUNET_DYNAMIC = YUNET_MODEL.with_name("face_detection_yunet_2023mar_dynamic.onnx")
-SCORE_THRESHOLD, NMS_THRESHOLD, TOP_K = 0.6, 0.3, 5000
+SCORE_THRESHOLD, NMS_THRESHOLD, TOP_K = 0.7, 0.3, 5000
 # Images of one size needed before that size moves to the GPU (see use_gpu).
 # Roughly where the one-off GPU set-up for a size (a few seconds) is paid back.
 GPU_AFTER_IMAGES = 20
@@ -146,8 +147,93 @@ def use_gpu(align=32, gpu_after=0):
     return "Face detection on GPU (onnxruntime CUDA)"
 
 
+# --------------------------------------------------------------------------- raccoon
+
+# InsightFace "raccoon" model packages (SCRFD-10G detector). Downloaded on first
+# use to ~/.insightface/models. The models are for non-commercial research only.
+RACCOON_MODELS = ("raccoon_s", "raccoon_l")
+MODELS = RACCOON_MODELS + ("yunet",)
+DEFAULT_MODEL = "raccoon_s"
+RACCOON_THRESHOLD = 0.5  # same as InsightFace PrivateFrame
+
+
+def onnx_providers(cpu=False):
+    """Best available onnxruntime providers: CUDA, then CoreML, then CPU."""
+    import onnxruntime as ort
+    if cpu:
+        return ["CPUExecutionProvider"]
+    avail = ort.get_available_providers()
+    if "CUDAExecutionProvider" in avail and hasattr(ort, "preload_dlls"):
+        import contextlib, io
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                ort.preload_dlls()
+        except Exception:
+            pass
+    return [p for p in ("CUDAExecutionProvider", "CoreMLExecutionProvider") if p in avail] \
+        + ["CPUExecutionProvider"]
+
+
+class Raccoon:
+    """InsightFace SCRFD detector from a raccoon_s / raccoon_l package.
+
+    Runs at 640 px (large faces) and, for bigger images, also at 1280 px
+    (small faces); the two are merged with NMS.
+    """
+
+    def __init__(self, name, cpu=False):
+        try:
+            from insightface.model_zoo import get_model
+            from insightface.utils.storage import ensure_available
+        except ImportError:
+            sys.exit(f"--model {name} needs InsightFace: pip install -r requirements.txt\n"
+                     "(or use --model yunet, which needs only OpenCV)")
+        ensure_available("models", name)  # downloads on first use
+        self.det = get_model(name, model_task="detection", providers=onnx_providers(cpu))
+        self.provider = self.det.session.get_providers()[0]
+        self.sizes = None
+
+    def detect(self, img, min_size=0):
+        big = max(img.shape[:2]) > 800
+        sizes = [(640, 640), (1280, 1280)] if big else [(640, 640)]
+        if sizes != self.sizes:
+            self.det.prepare(0, det_thresh=RACCOON_THRESHOLD, input_size=sizes)
+            self.sizes = sizes
+        dets, _ = self.det.detect(img)
+        H, W = img.shape[:2]
+        faces = []
+        for x0, y0, x1, y1, _score in dets:
+            x0, y0 = max(int(x0), 0), max(int(y0), 0)
+            x1, y1 = min(int(round(x1)), W), min(int(round(y1)), H)
+            if x1 - x0 > 0 and y1 - y0 > 0 and min(x1 - x0, y1 - y0) >= min_size:
+                faces.append((x0, y0, x1 - x0, y1 - y0))
+        return faces
+
+
+_raccoon = None
+
+
+def use_model(name, cpu=False):
+    """Select the face detector. Returns a message describing it."""
+    global _raccoon
+    if name == "yunet":
+        _raccoon = None
+        return "Face detector: YuNet (OpenCV)"
+    _raccoon = Raccoon(name, cpu)
+    return f"Face detector: {name} (InsightFace SCRFD, {_raccoon.provider})"
+
+
+def gpu_message(msg):
+    """GPU is tried by default: a missing GPU is normal, not a warning."""
+    if msg.startswith("WARNING: --gpu needs") or "has no CUDA support" in msg:
+        return "No NVIDIA GPU support installed: face detection on CPU"
+    return msg
+
+
 def detect_faces(img, min_size=24):
     """Return a list of (x, y, w, h) face boxes."""
+    if _raccoon is not None:
+        return _raccoon.detect(img, min_size)
     if _ort is not None:
         a = _ort.align
         key = (-(-img.shape[0] // a), -(-img.shape[1] // a))
@@ -321,23 +407,31 @@ def main():
     ap.add_argument("output_dir")
     ap.add_argument("--method", choices=["gaussian", "pixelate"], default="gaussian")
     ap.add_argument("--strength", type=int, default=3, help="1 (light) .. 3 (heavy)")
-    ap.add_argument("--min-size", type=int, default=24, help="smallest face size in px")
+    ap.add_argument("--model", choices=MODELS, default=DEFAULT_MODEL,
+                    help="face detector: raccoon_s (default, accurate), raccoon_l (larger), "
+                         "or yunet (small and fast, for low-end machines)")
+    ap.add_argument("--min-size", type=int, default=None,
+                    help="smallest face size in px (default: 24 for yunet, no limit otherwise)")
     ap.add_argument("--pad", type=float, default=0.15,
                     help="margin around each face as a fraction of its size (0 = tight)")
     ap.add_argument("--shape", choices=["rect", "oval"], default="oval",
                     help="blur the whole box or an oval that follows the face")
-    ap.add_argument("--gpu", action="store_true",
-                    help="run face detection on an NVIDIA GPU (needs requirements-gpu.txt)")
+    ap.add_argument("--cpu", action="store_true",
+                    help="do not use a GPU (by default a GPU is used when one is available)")
+    ap.add_argument("--gpu", action="store_true", help=argparse.SUPPRESS)  # now the default
     args = ap.parse_args()
     if not 0 <= args.pad <= 1:
         ap.error(f"--pad is a fraction of the face size between 0 and 1, not pixels "
                  f"(got {args.pad}; 0.15 adds a 15% margin). Large values blur the whole image.")
+    if args.min_size is None:
+        args.min_size = 24 if args.model == "yunet" else 0
     if not YUNET_MODEL.exists():
         sys.exit(f"Model not found: {YUNET_MODEL}")
-    if args.gpu:
+    print(use_model(args.model, args.cpu))
+    if args.model == "yunet" and not args.cpu:
         # Images: pad to multiples of 128 so mixed sizes share GPU set-ups
         # (same faces as with 32, within 2 px, on the test set).
-        print(use_gpu(align=128, gpu_after=GPU_AFTER_IMAGES))
+        print(gpu_message(use_gpu(align=128, gpu_after=GPU_AFTER_IMAGES)))
     process_dataset(args.input_dir, args.output_dir, args.method, args.strength,
                     args.min_size, args.pad, args.shape)
 

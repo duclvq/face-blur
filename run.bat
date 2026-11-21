@@ -13,7 +13,7 @@ set "HERE=%~dp0"
 set "VENV=%HERE%.venv"
 set "VPY=%VENV%\Scripts\python.exe"
 
-if exist "%VENV%\.installed" goto run
+if exist "%VENV%\.installed-v2" goto run
 
 echo [setup] Preparing environment (first run only)...
 
@@ -40,7 +40,7 @@ echo [setup] Creating virtual environment in %VENV%
 %PY% -m venv "%VENV%" || goto setup_fail
 echo [setup] Installing requirements...
 "%VPY%" -m pip install --disable-pip-version-check -q -r "%HERE%requirements.txt" || goto setup_fail
-echo ok> "%VENV%\.installed"
+echo ok> "%VENV%\.installed-v2"
 echo [setup] Done.
 
 :run

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Face blur launcher for Linux (and macOS).
 # First run: creates a local .venv next to this file and installs the
-# requirements into it (GPU extras too when --gpu is given). Later runs reuse it.
+# requirements into it (plus GPU packages when an NVIDIA GPU is found). Later
+# runs reuse it. A GPU is used by default when available; --cpu turns it off.
 #
 # Usage:
-#   ./run.sh INPUT [OUTPUT] [--method pixelate] [--strength 2] [--gpu] ...
+#   ./run.sh INPUT [OUTPUT] [--method pixelate] [--strength 2] [--cpu] ...
 #
 # INPUT can be a folder of images, a folder of videos, or one video file.
 # Without OUTPUT, results go next to the input: FOLDER_blurred, or
@@ -18,7 +19,7 @@ VIDEO_RE='\.(mp4|mov|avi|mkv|webm|m4v)$'
 IMAGE_RE='\.(jpg|jpeg|png|bmp|webp|tif|tiff)$'
 
 usage() {
-    echo "Usage: $0 INPUT [OUTPUT] [--method gaussian|pixelate] [--strength 1-3] [--gpu] ..."
+    echo "Usage: $0 INPUT [OUTPUT] [--method gaussian|pixelate] [--strength 1-3] [--cpu] ..."
     echo "  INPUT: a folder of images, a folder of videos, or one video file"
     exit 1
 }
@@ -30,8 +31,8 @@ case "$1" in -h|--help) usage ;; esac
 IN="$1"; shift
 OUT=""
 if [ $# -ge 1 ] && [[ "$1" != --* ]]; then OUT="$1"; shift; fi
-GPU=0
-for a in "$@"; do [ "$a" = "--gpu" ] && GPU=1; done
+GPU=1
+for a in "$@"; do [ "$a" = "--cpu" ] && GPU=0; done
 
 [ -e "$IN" ] || { echo "[error] Input not found: $IN"; exit 1; }
 IN="$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")"
@@ -88,19 +89,31 @@ setup() {
                 echo "        On Debian/Ubuntu: sudo apt install python3-venv"
                 rm -rf "$VENV"; return 1; }
         fi
-        "$VPY" -m pip install --disable-pip-version-check -q -r "$req" || return 1
+        "$VPY" -m pip install --disable-pip-version-check --prefer-binary -q -r "$req" || return 1
     fi
     echo ok > "$VENV/$marker"
     echo "[setup] Done."
 }
 
-setup "$HERE/requirements.txt" .installed || {
+setup "$HERE/requirements.txt" .installed-v2 || {
     echo "[error] Setup failed. Fix the error above and run again."; exit 1; }
 if [ "$GPU" -eq 1 ]; then
     if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi -L >/dev/null 2>&1; then
-        echo "[warn] --gpu: no NVIDIA GPU/driver found (nvidia-smi); running on the CPU."
-    elif ! setup "$HERE/requirements-gpu.txt" .installed-gpu; then
-        echo "[warn] --gpu: could not install the GPU packages; running on the CPU."
+        :   # no NVIDIA GPU: macOS uses the Apple GPU (CoreML) by itself, others the CPU
+    else
+        # onnxruntime-gpu replaces the CPU onnxruntime (both are "onnxruntime").
+        if [ ! -f "$VENV/.installed-gpu-v2" ]; then
+            if command -v uv >/dev/null 2>&1; then
+                uv pip uninstall -q --python "$VPY" onnxruntime >/dev/null 2>&1 || true
+            else
+                "$VPY" -m pip uninstall -y -q onnxruntime >/dev/null 2>&1 || true
+            fi
+        fi
+        if ! setup "$HERE/requirements-gpu.txt" .installed-gpu-v2; then
+            echo "[warn] Could not install the NVIDIA GPU packages; running on the CPU."
+            rm -f "$VENV/.installed-v2"   # reinstall the CPU onnxruntime next run
+            setup "$HERE/requirements.txt" .installed-v2 || true
+        fi
     fi
 fi
 
