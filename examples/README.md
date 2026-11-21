@@ -17,5 +17,6 @@ On Windows: `run.bat examples\input examples\output`
 | `sports/football.jpg` | 1 |
 | `crowd/street_parade.jpg` (Apollo 11 ticker-tape parade, New York, 1969) | 27 (10 with `--model yunet`) |
 | `crowd/room_mission_control.jpg` (Mission Control after Apollo 11, 1969) | 19 (4 with `--model yunet`) |
+| `crowd/film_set.jpg` (behind-the-scenes photos from a film set) | 25 (22 with `--model yunet`) |
 
-Image credits: `team/*` and `crowd/*` are NASA photos (public domain, images.nasa.gov; the crowd photos are S70-17433 and S69-40022). `sports/football.jpg` is `messi5.jpg` from the OpenCV sample data.
+Image credits: `team/*` and `crowd/*` are NASA photos (public domain, images.nasa.gov; the crowd photos are S70-17433 and S69-40022). `sports/football.jpg` is `messi5.jpg` from the OpenCV sample data. `crowd/film_set.jpg` is from https://i.redd.it/pa2mjlht85731.jpg (not public domain; copyright belongs to its owner).
