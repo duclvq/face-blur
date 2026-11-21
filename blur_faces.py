@@ -153,7 +153,7 @@ def use_gpu(align=32, gpu_after=0):
 # use to ~/.insightface/models. The models are for non-commercial research only.
 RACCOON_MODELS = ("raccoon_s", "raccoon_l")
 MODELS = RACCOON_MODELS + ("yunet",)
-DEFAULT_MODEL = "raccoon_s"
+DEFAULT_MODEL = "yunet"
 RACCOON_THRESHOLD = 0.5  # same as InsightFace PrivateFrame
 
 
@@ -408,8 +408,8 @@ def main():
     ap.add_argument("--method", choices=["gaussian", "pixelate"], default="gaussian")
     ap.add_argument("--strength", type=int, default=3, help="1 (light) .. 3 (heavy)")
     ap.add_argument("--model", choices=MODELS, default=DEFAULT_MODEL,
-                    help="face detector: raccoon_s (default, accurate), raccoon_l (larger), "
-                         "or yunet (small and fast, for low-end machines)")
+                    help="face detector: yunet (default; small and fast), raccoon_s (more "
+                         "accurate, finds small faces, slower) or raccoon_l (larger)")
     ap.add_argument("--min-size", type=int, default=None,
                     help="smallest face size in px (default: 24 for yunet, no limit otherwise)")
     ap.add_argument("--pad", type=float, default=0.15,

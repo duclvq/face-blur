@@ -643,9 +643,9 @@ def main():
     ap.add_argument("--strength", type=int, choices=[1, 2, 3], default=3,
                     help="1 (light) .. 3 (heavy)")
     ap.add_argument("--model", choices=MODELS, default=DEFAULT_MODEL,
-                    help="face detector: raccoon_s (default; InsightFace PrivateFrame with "
-                         "tracking), raccoon_l (larger), or yunet (small and fast, for "
-                         "low-end machines)")
+                    help="face detector: yunet (default; small and fast), raccoon_s (more "
+                         "accurate: InsightFace PrivateFrame with tracking, slower) or "
+                         "raccoon_l (larger)")
     ap.add_argument("--analysis-fps", type=float, default=15, metavar="N",
                     help="raccoon models: full face scans per second of video (default 15; "
                          "use 30 for fast motion, or the video's frame rate to scan every frame)")
