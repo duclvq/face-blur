@@ -1,0 +1,5 @@
+# Optional: NVIDIA GPU face detection (--gpu). Installs onnxruntime with CUDA
+# and the CUDA/cuDNN runtime libraries from pip, so no CUDA toolkit is needed;
+# only a recent NVIDIA driver.
+-r requirements.txt
+onnxruntime-gpu[cuda,cudnn]>=1.22
