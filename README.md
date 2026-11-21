@@ -82,6 +82,27 @@ No face detector is perfect. Check a sample of the output by hand before sharing
 
 Between detections it follows faces with optical flow. Output is delayed by `--delay` seconds (default `0.5`), so a face is blurred from its first frame, not from when it is first detected. `--delay 0` leaves more faces exposed. If the machine is too slow, frames are dropped, never sent unblurred. No sound.
 
+## Use it from your own code
+
+`faceblur.py` wraps the scripts in a small API. [`examples/quickstart.py`](examples/quickstart.py) is a runnable guide (`python examples/quickstart.py`, or `--webcam`).
+
+```python
+from faceblur import FaceBlurrer
+
+fb = FaceBlurrer()                          # model="yunet", method="gaussian", strength=3, ...
+boxes = fb.detect(img)                      # BGR numpy image -> [(x, y, w, h), ...]
+out = fb.blur(img)                          # blurred copy
+fb.blur_file("in.jpg", "out.jpg")           # image file -> number of faces
+fb.blur_video("in.mp4", "out.mp4")          # video file, keeps sound with ffmpeg
+
+live = fb.stream(fps=30, delay=0.5)         # live frames: webcam, RTSP, ...
+for frame in frames:
+    for out in live.push(frame):            # each frame comes out 0.5 s later
+        show(out)
+```
+
+Create one `FaceBlurrer` and reuse it; use one model per process.
+
 ## Running the scripts directly
 
 ```bash
