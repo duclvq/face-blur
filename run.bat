@@ -47,7 +47,7 @@ if exist "%VENV%" rmdir /s /q "%VENV%"
 echo [setup] Creating virtual environment in %VENV%
 %PY% -m venv "%VENV%" || goto setup_fail
 echo [setup] Installing requirements...
-"%VPY%" -m pip install --disable-pip-version-check --prefer-binary -q -r "%HERE%requirements.txt" || goto setup_fail
+"%VPY%" -m pip install --disable-pip-version-check --prefer-binary --timeout 60 --retries 10 -r "%HERE%requirements.txt" || goto setup_fail
 echo ok> "%VENV%\.installed-v2"
 echo [setup] Done.
 
@@ -125,10 +125,10 @@ if exist "%VENV%\.installed-gpu-v2" goto ffmpeg_check
 nvidia-smi -L >nul 2>&1 || goto ffmpeg_check
 echo [setup] NVIDIA GPU found. Installing GPU packages (first time only)...
 "%VPY%" -m pip uninstall -y -q onnxruntime >nul 2>&1
-"%VPY%" -m pip install --disable-pip-version-check --prefer-binary -q -r "%HERE%requirements-gpu.txt"
+"%VPY%" -m pip install --disable-pip-version-check --prefer-binary --timeout 60 --retries 10 -r "%HERE%requirements-gpu.txt"
 if errorlevel 1 (
     echo [warn] Could not install the NVIDIA GPU packages; running on the CPU.
-    "%VPY%" -m pip install --disable-pip-version-check -q onnxruntime
+    "%VPY%" -m pip install --disable-pip-version-check --timeout 60 --retries 10 onnxruntime
 ) else (
     echo ok> "%VENV%\.installed-gpu-v2"
     echo [setup] Done.
