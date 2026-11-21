@@ -20,3 +20,5 @@ On Windows: `run.bat examples\input examples\output`
 | `crowd/film_set.jpg` (behind-the-scenes photos from a film set) | 25 (22 with `--model yunet`) |
 
 Image credits: `team/*` and `crowd/*` are NASA photos (public domain, images.nasa.gov; the crowd photos are S70-17433 and S69-40022). `sports/football.jpg` is `messi5.jpg` from the OpenCV sample data. `crowd/film_set.jpg` is from https://i.redd.it/pa2mjlht85731.jpg (not public domain; copyright belongs to its owner).
+
+`video/street_before_after.*` shows `crowd_street.mp4` (from https://www.youtube.com/watch?v=b8QZJ5ZodTs, not public domain) before and after `blur_video.py` with the default model.

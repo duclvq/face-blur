@@ -6,12 +6,9 @@ Blur every face in a folder of photos or videos, for example to anonymize a rese
 |:-:|:-:|
 | ![film set](examples/input/crowd/film_set.jpg) | ![film set, blurred](examples/output/crowd/film_set.jpg) |
 
-**Crowds, on a street and in a room** (default model: 27 and 19 faces found; `--model yunet` finds 10 and 4):
+**Video** (left: original, right: blurred; [full clip as MP4](examples/video/street_before_after.mp4)):
 
-| Street | Room |
-|:-:|:-:|
-| ![street crowd](examples/input/crowd/street_parade.jpg) | ![room crowd](examples/input/crowd/room_mission_control.jpg) |
-| ![street crowd, blurred](examples/output/crowd/street_parade.jpg) | ![room crowd, blurred](examples/output/crowd/room_mission_control.jpg) |
+![street video, before and after](examples/video/street_before_after.gif)
 
 ## Quick start
 
