@@ -6,6 +6,15 @@ Blur every face in a folder of photos or videos, for example to anonymize a rese
 |:-:|:-:|
 | ![original](examples/options/original.jpg) | ![blurred](examples/options/gaussian_3.jpg) |
 
+**Crowds, on a street and in a room** (default model: 27 and 19 faces found; `--model yunet` finds 10 and 4):
+
+| Street | Room |
+|:-:|:-:|
+| ![street crowd](examples/input/crowd/street_parade.jpg) | ![room crowd](examples/input/crowd/room_mission_control.jpg) |
+| ![street crowd, blurred](examples/output/crowd/street_parade.jpg) | ![room crowd, blurred](examples/output/crowd/room_mission_control.jpg) |
+
+Very small faces far in the background can still be missed.
+
 ## Quick start
 
 **Linux / macOS**
