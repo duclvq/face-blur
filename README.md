@@ -70,6 +70,18 @@ See [`examples/options`](examples/options) for what each option looks like.
 
 No face detector is perfect. Check a sample of the output by hand before sharing.
 
+## Live streams
+
+`blur_stream.py` blurs a webcam, an RTSP/RTMP/HTTP stream or a file as it plays, with YuNet:
+
+```bash
+.venv/bin/python blur_stream.py 0 --show                              # webcam, preview window
+.venv/bin/python blur_stream.py rtsp://camera/stream out.mp4          # camera to a file
+.venv/bin/python blur_stream.py rtsp://camera/stream rtmp://server/live  # re-stream
+```
+
+Between detections it follows faces with optical flow. Output is delayed by `--delay` seconds (default `0.5`), so a face is blurred from its first frame, not from when it is first detected. `--delay 0` leaves more faces exposed. If the machine is too slow, frames are dropped, never sent unblurred. No sound.
+
 ## Running the scripts directly
 
 ```bash
