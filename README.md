@@ -18,13 +18,14 @@ cd face-blur
 ./run.sh ~/videos/party.mp4        # one video           -> ~/videos/party_blurred.mp4
 ```
 
-**Windows** (images only for now)
+**Windows**
 
 ```bat
-run.bat C:\path\to\dataset
+run.bat C:\photos\dataset
+run.bat C:\videos\party.mp4
 ```
 
-The first run installs everything into a local `.venv` and downloads the face model, which takes a few minutes. For videos, also install [ffmpeg](https://ffmpeg.org/download.html) so the output keeps its sound.
+The first run sets itself up, which takes a few minutes.
 
 ## Models
 
@@ -61,7 +62,7 @@ See [`examples/options`](examples/options) for what each option looks like.
 
 - Your originals are never changed. Results go to a separate folder with the same structure.
 - `blur_report.csv` lists how many faces were found in each file.
-- Videos keep their format, frame rate, size, sound and subtitles (needs ffmpeg).
+- Videos keep their format, frame rate, size, sound and subtitles (needs [ffmpeg](https://ffmpeg.org/download.html)).
 
 No face detector is perfect. Check a sample of the output by hand before sharing.
 
@@ -73,7 +74,7 @@ python blur_faces.py INPUT_DIR OUTPUT_DIR [options]   # images
 python blur_video.py INPUT OUTPUT [options]           # a video or a folder of videos
 ```
 
-For an NVIDIA GPU: `pip uninstall -y onnxruntime && pip install -r requirements-gpu.txt` (driver 580 or newer). `run.sh` does this by itself.
+For an NVIDIA GPU: `pip uninstall -y onnxruntime && pip install -r requirements-gpu.txt` (driver 580 or newer). `run.sh` and `run.bat` do this by themselves.
 
 ## Built with
 

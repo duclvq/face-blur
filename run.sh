@@ -74,13 +74,20 @@ setup() {
     [ -f "$VENV/$marker" ] && return 0
     echo "[setup] Installing $(basename "$req") into $VENV (first run only)..."
     if command -v uv >/dev/null 2>&1; then
-        if [ ! -x "$VPY" ]; then uv venv -q "$VENV" || return 1; fi
+        if [ ! -x "$VPY" ]; then uv venv -q --python ">=3.11,<3.15" "$VENV" || return 1; fi
         uv pip install -q --python "$VPY" -r "$req" || return 1
     else
         local py
-        py="$(command -v python3 || command -v python || true)"
+        # onnxruntime has wheels for Python 3.11-3.14 only.
+        py=""
+        for c in python3.12 python3.13 python3.11 python3.14 python3 python; do
+            if command -v "$c" >/dev/null 2>&1 && "$c" -c \
+                'import sys; sys.exit(not (3,11) <= sys.version_info[:2] <= (3,14))' 2>/dev/null; then
+                py="$(command -v "$c")"; break
+            fi
+        done
         if [ -z "$py" ]; then
-            echo "[error] Python 3.8+ not found. Install it (e.g. sudo apt install python3 python3-venv)."
+            echo "[error] Python 3.11-3.14 not found. Install it (e.g. sudo apt install python3 python3-venv)."
             return 1
         fi
         if [ ! -x "$VPY" ]; then
