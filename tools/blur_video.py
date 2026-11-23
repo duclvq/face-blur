@@ -5,7 +5,7 @@ This is the only file in the repo that encodes video. The library itself
 (faceblur.py) works on numpy frames; this shows one way to read a video,
 run the frames through FaceBlurrer.stream() and write the result.
 
-    python tools/blur_video.py IN.mp4 OUT.mp4 [--model yunet] [--detect-every 3]
+    python tools/blur_video.py IN.mp4 OUT.mp4 [--model yunet]
 
 Writes H.264 with ffmpeg when it is installed, otherwise MPEG-4 Part 2 with
 OpenCV. Sound, subtitles and the source codec are not kept.
@@ -58,7 +58,6 @@ def main():
     ap.add_argument("input")
     ap.add_argument("output", help="output .mp4")
     ap.add_argument("--model", choices=MODELS, default=DEFAULT_MODEL)
-    ap.add_argument("--detect-every", type=int, default=1)
     a = ap.parse_args()
     if Path(a.input).resolve() == Path(a.output).resolve():
         sys.exit("output must not be the input file")
@@ -71,7 +70,7 @@ def main():
 
     fb = FaceBlurrer(model=a.model)
     print(fb.backend)
-    live = fb.stream(fps=fps, detect_every=a.detect_every)
+    live = fb.stream(fps=fps)
     out = Mp4Writer(a.output, size, fps)
     n = 0
     try:

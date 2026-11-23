@@ -8,7 +8,7 @@ a scripted detector, so hours of feed run in minutes; the soak loops the real
 street clip of test_live_feed.py at its real frame rate.
 
 The scripted detector replaces tracker.detect_faces_scored only; ByteTrack,
-optical flow, the delay buffer and FrameResult are the real code.
+the delay buffer and FrameResult are the real code.
 """
 import os
 import statistics
@@ -194,15 +194,14 @@ def test_frame_time_after_a_week_without_scene_cut(scripted):
 
 def test_reset_forgets_faces_keeps_frames(scripted):
     """live.reset() from the output thread: no frame lost, the faces found
-    after it get new track ids, and the faces on screen stay blurred (the
-    detector runs on the very next frame, even with detect_every=3)."""
+    after it get new track ids, and the faces on screen stay blurred."""
     crowd = scripted(spawn_per_s=3.0)
-    live = FaceBlurrer(mask=False).stream(fps=FPS, delay=6, detect_every=3)
+    live = FaceBlurrer(mask=False).stream(fps=FPS, delay=6)
     tag, order, k = {}, [], 0
     for step in range(600):
         f = crowd.next()
         tag[id(f)] = step
-        if step == 301:  # not a detector frame (301 % 3 != 0)
+        if step == 301:
             before = set(live.analyzer.faces)
             live.reset()
         live.put(f)

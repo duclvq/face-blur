@@ -2,8 +2,7 @@
 """Blur faces in a live feed and preview it (tracker.py, no output delay).
 
 Usage:
-    python tools/blur_live.py SOURCE [--show] [--model face_det_lite|yunet|...]
-                              [--detect-every 3] ...
+    python tools/blur_live.py SOURCE [--show] [--model face_det_lite|yunet|...] ...
 
 SOURCE is a webcam index (0), an RTSP/RTMP/HTTP/UDP URL, or a video file.
 --show previews the blurred frames; without it the run only prints timings.
@@ -96,9 +95,6 @@ def main():
                                              "(preview only; nothing is saved).")
     ap.add_argument("source", help="webcam index (0), stream URL, or video file")
     ap.add_argument("--show", action="store_true", help="show the blurred video in a window")
-    ap.add_argument("--detect-every", type=int, default=1, metavar="N",
-                    help="run the detector every N frames (default 1: every frame); optical "
-                         "flow moves faces in between. Raise it on a slow machine")
     ap.add_argument("--low-score", type=float, default=0.3, metavar="S",
                     help="ByteTrack second stage: detections scoring S up to the normal "
                          "threshold keep an existing face tracked (never start a new one). "
@@ -143,8 +139,8 @@ def main():
             print(f"--npu uses {npu_model} (not {o.model})")
         o.model = npu_model
         o.device = "cpu" if o.npu_allow_cpu else "npu"
-    if o.detect_every < 1 or not 0 <= o.pad <= 1:
-        ap.error("--detect-every >= 1, --pad 0..1")
+    if not 0 <= o.pad <= 1:
+        ap.error("--pad is 0..1")
     if o.min_size is None:
         o.min_size = 8 if o.model == "yunet" else 0
 
@@ -169,8 +165,7 @@ def main():
             npu_msg = "WARNING: onnxruntime has no QNN support (pip install onnxruntime-qnn); using CPU"
     if npu_msg:
         print(npu_msg)
-    print(f"Source: {W}x{H} @ {fps:.3f} fps ({'live' if live else 'realtime file' if o.realtime else 'file'}), "
-          f"detector every {o.detect_every} frame(s)")
+    print(f"Source: {W}x{H} @ {fps:.3f} fps ({'live' if live else 'realtime file' if o.realtime else 'file'})")
 
     stats = dict(dropped=0, max_retries=o.max_retries)
     stop = threading.Event()

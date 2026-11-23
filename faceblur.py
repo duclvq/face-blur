@@ -50,8 +50,6 @@ class FaceBlurrer:
     threshold -- confidence a detection needs to count as a face, 0..1
                 (default: the model's own, yolo11n 0.3, face_det_lite 0.55,
                 yunet 0.7). Lower finds more faces and more false ones
-    tiles    -- also detect on an N x N grid of overlapping tiles (1 = off):
-                finds smaller faces, costs 1 + N*N detector runs per frame
     device   -- where the detector runs: "cpu" (default), "gpu" (NVIDIA,
                 needs onnxruntime-gpu) or "npu" (Qualcomm, needs onnxruntime-qnn).
                 A device that is missing raises RuntimeError. self.backend
@@ -64,7 +62,7 @@ class FaceBlurrer:
     """
 
     def __init__(self, model=DEFAULT_MODEL, method="gaussian", strength=3, pad=0.15,
-                 shape="oval", min_size=None, device="cpu", tiles=1, threshold=None, mask=True):
+                 shape="oval", min_size=None, device="cpu", threshold=None, mask=True):
         if model not in MODELS:
             raise ValueError(f"model must be one of {MODELS}, not {model!r}")
         if method not in ("gaussian", "pixelate"):
@@ -81,7 +79,6 @@ class FaceBlurrer:
 
         try:
             self.backend = detector.use_model(model, device)
-            detector.use_tiles(tiles)
             detector.use_threshold(threshold)
         except SystemExit as e:  # detector exits when a model cannot start
             raise RuntimeError(str(e)) from None
@@ -120,9 +117,9 @@ class FaceBlurrer:
 
     # ---------------------------------------------------------------- live
 
-    def stream(self, fps, detect_every=1, low_score=0.3, delay=0, max_state_mb=100):
+    def stream(self, fps, low_score=0.3, delay=0, max_state_mb=100):
         """A StreamBlurrer for live frames; see that class."""
-        return StreamBlurrer(self, fps, detect_every, low_score, delay, max_state_mb)
+        return StreamBlurrer(self, fps, low_score, delay, max_state_mb)
 
 
 class StreamBlurrer:
@@ -130,8 +127,8 @@ class StreamBlurrer:
 
     Faces are tracked with ByteTrack (Kalman filter + two-stage matching:
     low-score detections, low_score .. the normal threshold, keep an existing
-    face tracked; 0 = off). Between detector runs (detect_every) the box
-    follows optical flow. A face the detector loses is not blurred any longer
+    face tracked; 0 = off). The detector runs on every frame. A face the
+    detector loses is not blurred any longer
     (no hold); with a delay, the frames between are filled if it is found again.
 
     push(frame) returns a FrameResult: the original frame, the blurred frame
@@ -164,12 +161,12 @@ class StreamBlurrer:
     limit: they are yours, see live.buffered.
     """
 
-    def __init__(self, blurrer, fps, detect_every=1, low_score=0.3, delay=0, max_state_mb=100):
+    def __init__(self, blurrer, fps, low_score=0.3, delay=0, max_state_mb=100):
         from tracker import Analyzer, Lookahead  # imported here: only needed for streams
-        if fps <= 0 or detect_every < 1 or max_state_mb <= 0:
-            raise ValueError("need fps > 0, detect_every >= 1, max_state_mb > 0")
+        if fps <= 0 or max_state_mb <= 0:
+            raise ValueError("need fps > 0, max_state_mb > 0")
         self.fb = blurrer
-        opts = SimpleNamespace(detect_every=detect_every, min_size=blurrer.min_size,
+        opts = SimpleNamespace(min_size=blurrer.min_size,
                                low_score=low_score, max_state_mb=max_state_mb)
         self.analyzer = Analyzer(opts, fps)
         self.buffer = Lookahead(self.analyzer)

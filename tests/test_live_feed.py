@@ -82,7 +82,6 @@ def reference_faces():
     global _reference
     if _reference is None:
         detector.use_model(REF_MODEL)
-        detector.use_tiles(1)
         detector.use_threshold(None)
         _reference = [[f[:4] for f in detector.detect_faces_scored(fr, 0, REF_SCORE)
                        if min(f[2], f[3]) >= MIN_REF_SIZE] for fr in frames()]
@@ -103,11 +102,11 @@ def coverage(face, boxes):
 
 # --------------------------------------------------------------------------- runs
 
-def run_single_thread(delay, detect_every=1, model="yolo11n_640"):
+def run_single_thread(delay, model="yolo11n_640"):
     """The quickstart loop: put() each frame, get() while frames are ready, flush at the end.
     Returns (boxes per output frame, put() times in ms, max frames held)."""
     fb = FaceBlurrer(model=model, mask=False)
-    live = fb.stream(fps=clip_fps(), detect_every=detect_every, delay=delay)
+    live = fb.stream(fps=clip_fps(), delay=delay)
     out, put_ms, held = [], [], 0
     for f in frames():
         t = time.perf_counter()
@@ -267,15 +266,10 @@ def test_delay_leaves_fewer_faces_unblurred():
     ref = reference_faces()
     total = sum(map(len, ref))
     assert total > 0
-    results = {}
-    for de in (1, 3):
-        for delay in (0, 12):
-            boxes, _, _ = run_single_thread(delay, de)
-            results[de, delay] = miss_rate(boxes, ref)[0]
+    results = {d: miss_rate(run_single_thread(d)[0], ref)[0] for d in (0, 12)}
     print(f"\n  unblurred reference faces (of {total}): "
-          + ", ".join(f"detect_every={de} delay={d}: {m}" for (de, d), m in results.items()))
-    for de in (1, 3):
-        assert results[de, 12] <= results[de, 0], f"delay made detect_every={de} worse"
+          + ", ".join(f"delay={d}: {m}" for d, m in results.items()))
+    assert results[12] <= results[0], "delay left more faces unblurred"
 
 
 # --------------------------------------------------------------------------- report
@@ -292,14 +286,13 @@ def report():
     print(f"Reference: {REF_MODEL} >= {REF_SCORE}, faces >= {MIN_REF_SIZE} px: {total} faces "
           f"in {sum(1 for r in ref if r)} frames ({time.perf_counter() - t:.0f} s)\n")
 
-    print("| detect_every | delay | unblurred faces | frames with a miss | put() median / p95 ms | max held |")
-    print("|---|---|---|---|---|---|")
-    for de in (1, 3):
-        for delay in (0, 6, 12, 25):
-            boxes, put_ms, held = run_single_thread(delay, de)
-            m, tot, fm = miss_rate(boxes, ref)
-            print(f"| {de} | {delay} | {m} ({100 * m / tot:.1f}%) | {fm} | "
-                  f"{statistics.median(put_ms):.1f} / {np.percentile(put_ms, 95):.1f} | {held} |")
+    print("| delay | unblurred faces | frames with a miss | put() median / p95 ms | max held |")
+    print("|---|---|---|---|---|")
+    for delay in (0, 6, 12, 25):
+        boxes, put_ms, held = run_single_thread(delay)
+        m, tot, fm = miss_rate(boxes, ref)
+        print(f"| {delay} | {m} ({100 * m / tot:.1f}%) | {fm} | "
+              f"{statistics.median(put_ms):.1f} / {np.percentile(put_ms, 95):.1f} | {held} |")
 
     print("\nTwo threads, input paced at the clip rate with jitter, output on a fixed clock:")
     print("| delay | jitter | frames out | ticks | repeats | forced | latency median / p95 ms | get() max ms | in order |")

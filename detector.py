@@ -6,7 +6,6 @@ the quantized YuNet NPU builds; then
 detect_faces_scored(img) returns (x, y, w, h, score) boxes, and
 blur_region(img, box) blurs one box in place.
 """
-import math
 import sys
 from pathlib import Path
 
@@ -217,50 +216,6 @@ def face_threshold():
     return SCORE_THRESHOLD
 
 
-# Tiling: besides the whole frame, the detector also runs on an N x N grid of
-# overlapping tiles, so small faces are seen at a larger scale. Helps the
-# detectors that shrink the frame to a fixed input (face_det_lite: 640x480,
-# yolo11n_640: 640x384); costs 1 + N*N detector runs per frame.
-_tiles = 1
-TILE_OVERLAP = 0.25  # each tile reaches this share of its size into its neighbours
-
-
-def use_tiles(n):
-    """Detect on the whole frame plus an n x n grid of tiles (1 = off)."""
-    global _tiles
-    _tiles = max(1, int(n))
-
-
-def tile_grid(W, H, n, overlap=TILE_OVERLAP):
-    """(x0, y0, x1, y1) of an n x n grid of overlapping tiles."""
-    def spans(size):
-        step = size / n
-        t = min(size, int(math.ceil(step * (1 + overlap))))
-        return [(s, s + t) for s in (min(max(int(round(i * step - (t - step) / 2)), 0), size - t)
-                                     for i in range(n))]
-    return [(x0, y0, x1, y1) for y0, y1 in spans(H) for x0, x1 in spans(W)]
-
-
-def merge_faces(faces, iou_thresh=0.3, inside=0.6):
-    """Merge duplicates from overlapping tiles: boxes that overlap (IoU) or
-    where one lies mostly inside the other are one face; the larger box is
-    kept (a face cut by a tile edge gives a smaller, partial box)."""
-    kept = []
-    for f in sorted(faces, key=lambda f: -f[4]):
-        x, y, w, h, _ = f
-        for k, g in enumerate(kept):
-            ix = max(0, min(x + w, g[0] + g[2]) - max(x, g[0]))
-            iy = max(0, min(y + h, g[1] + g[3]) - max(y, g[1]))
-            inter, a, b = ix * iy, w * h, g[2] * g[3]
-            if inter and (inter / (a + b - inter) >= iou_thresh or inter / min(a, b) >= inside):
-                if a > b:
-                    kept[k] = (x, y, w, h, g[4])
-                break
-        else:
-            kept.append(f)
-    return kept
-
-
 def _detect(img, min_size, thresh):
     _ensure_model()
     if _npu is not None:
@@ -273,14 +228,7 @@ def detect_faces_scored(img, min_size=24, thresh=None):
     (default: the detector's normal threshold, see face_threshold)."""
     if thresh is None:
         thresh = face_threshold()
-    faces = _detect(img, min_size, thresh)
-    if _tiles > 1:
-        H, W = img.shape[:2]
-        for x0, y0, x1, y1 in tile_grid(W, H, _tiles):
-            faces += [(x + x0, y + y0, w, h, sc)
-                      for x, y, w, h, sc in _detect(img[y0:y1, x0:x1], min_size, thresh)]
-        faces = merge_faces(faces)
-    return faces
+    return _detect(img, min_size, thresh)
 
 
 def detect_faces(img, min_size=24):

@@ -10,8 +10,6 @@ only shows the analysis step.
     python quickstart.py --input video.mp4                                           # a video file
     python quickstart.py --input video.mp4 --model yolo11n_1280                      # small faces, slower
     python quickstart.py --input video.mp4 --model face_det_lite                     # Qualcomm's detector
-    python quickstart.py --input video.mp4 --tiles 2                                 # small faces too
-    python quickstart.py --input video.mp4 --tiles 2 --detect-every 3                # detect every 3rd frame
     python quickstart.py --input video.mp4 --threshold 0.6                           # fewer false faces
     python quickstart.py --input video.mp4 --delay 12                                # 12 frames later (0.5 s at 25 fps), about half the misses
     python quickstart.py --input video.mp4 --method pixelate --shape rect            # pixel blocks over the whole box
@@ -36,9 +34,6 @@ def main():
     ap.add_argument("--input", default=SAMPLE, help="rtsp:// URL or video file (default: the sample clip)")
     ap.add_argument("--output", help="rtsp://, srt://, udp:// URL or .mp4 file (default: show in a window)")
     ap.add_argument("--model", choices=MODELS, default=DEFAULT_MODEL, help=f"face detector (default: {DEFAULT_MODEL})")
-    ap.add_argument("--detect-every", type=int, default=1, metavar="N",
-                    help="run the detector every N frames; tracking (ByteTrack + optical flow) "
-                         "moves the faces in between (default 1 = every frame)")
     ap.add_argument("--delay", type=int, default=0, metavar="FRAMES",
                     help="hold the output this many frames so later detections fix earlier "
                          "frames: about 0.5 s worth (e.g. 12 at 25 fps) leaves half as many faces "
@@ -66,19 +61,16 @@ def main():
                     help="do not blur: output the original frames (use with --show-scores to see the "
                          "boxes); for apps that mask the faces themselves from res.boxes")
     ap.add_argument("--show-scores", action="store_true", help="draw each face box with its confidence")
-    ap.add_argument("--tiles", type=int, default=1, metavar="N",
-                    help="also detect on an N x N grid of tiles, for small faces (default 1 = off; "
-                         "costs 1 + N*N detector runs per frame)")
     args = ap.parse_args()
 
     video = VideoSource(args.input)                   # decoded BGR frames
     sink = VideoSink(args.output, video.size, video.fps) if args.output else None
 
-    fb = FaceBlurrer(model=args.model, tiles=args.tiles, threshold=args.threshold,  # load once, reuse
+    fb = FaceBlurrer(model=args.model, threshold=args.threshold,  # load once, reuse
                      min_size=args.min_size, device=args.device,
                      method=args.method, strength=args.strength, shape=args.shape, pad=args.pad,
                      mask=not args.no_mask)
-    live = fb.stream(fps=video.fps, detect_every=args.detect_every, delay=args.delay,
+    live = fb.stream(fps=video.fps, delay=args.delay,
                      low_score=args.low_score)
 
     stats = Stats(budget_ms=1000 / video.fps)        # fps, speed and a graph of time and faces, drawn on the frame

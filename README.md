@@ -11,9 +11,8 @@ Setup: NVIDIA RTX 5060 Ti (`onnxruntime-gpu`), 1080p at 60 fps, no frame dropped
 
 ```python
 fb = FaceBlurrer(model="yolo11n_1280", device="gpu")
-live = fb.stream(fps=60, delay=30, low_score=0.2,   # delay 30 frames = 0.5 s at 60 fps
-                 detect_every=2)                     # detector on every 2nd frame, tracking in between
-# command line: python quickstart.py --input subway.mp4 --model yolo11n_1280 --device gpu --delay 30 --low-score 0.2 --detect-every 2
+live = fb.stream(fps=60, delay=30, low_score=0.2)   # delay 30 frames = 0.5 s at 60 fps
+# command line: python quickstart.py --input subway.mp4 --model yolo11n_1280 --device gpu --delay 30 --low-score 0.2
 ```
 
 ![a subway train before and after face-blur, with the time and face count graph](examples/video/subway_before_after.gif)
@@ -33,18 +32,14 @@ fb = FaceBlurrer(                   # load the model once, then reuse it; defaul
     # model="yolo11n_640",          # or "yolo11n_1280" (small faces), "face_det_lite", "yunet"
     # device="cpu",                 # or "gpu" (NVIDIA, onnxruntime-gpu), "npu" (Qualcomm, onnxruntime-qnn)
     # threshold=None,               # model's own confidence threshold (yolo11n 0.3)
-    # tiles=1,                      # N x N extra tiles for small faces
     # method="gaussian",            # or "pixelate"
     # strength=3,                   # 1 (light) .. 3 (heavy)
     # shape="oval",                 # or "rect" (whole box)
     # pad=0.15,                     # margin around each face
     # mask=False,                   # uncomment to skip blurring: res.blurred is None, mask res.boxes yourself
 )
-live = fb.stream(                   # live video: detector + tracker between frames
+live = fb.stream(                   # live video: detector on every frame + tracker
     fps=25,                         # nominal frame rate of your source (for the tracker)
-    # detect_every=3,               # uncomment for lower latency (2 or 3): detector on every 2nd or
-                                    #   3rd frame only, faces moved by tracking in between (2 to 3x less
-                                    #   work per frame). Default 1 = detector on every frame (most accurate)
     # delay=12,                     # uncomment for more accuracy: hold 12 frames (0.5 s at 25 fps) so
                                     #   faces the detector finds late are blurred in the earlier frames
                                     #   too; about a third fewer misses. Default 0 = no delay
@@ -111,18 +106,15 @@ The same options exist on the command line (`quickstart.py`, `tools/`) and in Py
 ### Detection and sampling: accuracy against speed and latency
 
 > [!IMPORTANT]
-> **The three settings that matter most** (in bold below):
+> **The two settings that matter most** (in bold below):
 > - **`--model`**: `yolo11n_640` (default) or `yolo11n_1280` for small faces.
-> - **`--detect-every N`**: run the detector every N frames (default `1`); raise it on a slow machine.
 > - **`--delay FRAMES`**: hold the output this many frames so later frames fix earlier ones (default `0`; about 0.5 s worth, e.g. `12` at 25 fps, leaves about a third fewer faces unblurred). Can be changed any time (`live.delay = n`); `put()` and `get()` are separate, so you decide when frames leave the buffer.
 
 | Command line | Python | Default | What it does | Trade-off |
 |---|---|---|---|---|
 | **`--model`** | `FaceBlurrer(model=)` | `yolo11n_640` | Face detector, see [Models](#models) | `yolo11n_1280`: more small faces, 3 to 4x slower |
-| **`--detect-every N`** | `fb.stream(detect_every=)` | `1` | Run the detector every N frames; tracking moves faces in between | N times less detector work; misses more fast or new faces |
 | **`--delay FRAMES`** | `fb.stream(delay=)`, `live.delay = n` any time | `0` (none) | Hold frames so later detections fix earlier ones: a new face is followed back through the earlier frames by its lower-score detections (down to 0.1), a face found again is filled in between | `12` (0.4 s at 30 fps): a third fewer faces left unblurred on two street clips (60 → 38, 82 → 54), output 12 frames late |
 | `--threshold T` | `FaceBlurrer(threshold=)` | model's own: yolo11n 0.3, face_det_lite 0.55, yunet 0.7 | Confidence a detection needs to count as a face (0 to 1) | Lower: more faces found, more false ones |
-| `--tiles N` | `FaceBlurrer(tiles=)` | `1` (off) | Also detect on an N x N grid of overlapping tiles, so small faces are seen larger | 1 + N×N detector runs per frame. Helps `face_det_lite`; YOLO rarely needs it |
 | `--min-size PX` | `FaceBlurrer(min_size=)` | `0` (`24` for yunet) | Skip faces smaller than PX pixels | Fewer false small faces, misses distant ones |
 | `--low-score S` | `fb.stream(low_score=)` | `0.3` | ByteTrack second stage: detections between this and the threshold keep a known face tracked | `0` turns it off |
 | `--device cpu\|gpu\|npu` | `FaceBlurrer(device=)` | `cpu` | Where the detector runs: `cpu`; `gpu`, an NVIDIA GPU (needs `pip install onnxruntime-gpu[cuda,cudnn]`); `npu`, a Qualcomm NPU (needs `onnxruntime-qnn`). Nothing is picked for you; a device that is missing is an error, not a silent CPU fallback | |
@@ -153,7 +145,7 @@ python quickstart.py --input clip.mp4 --show-scores                            #
 |---|---|
 | `faceblur.py` | Public API: `FaceBlurrer`, `StreamBlurrer`. The only module an app needs to import |
 | `detector.py` | Face detectors (YOLO11n-face, face_det_lite, YuNet) and the blur |
-| `tracker.py` | Live tracking: ByteTrack + optical flow, and the delay buffer |
+| `tracker.py` | Live tracking: ByteTrack, and the delay buffer |
 | `hexagon.py` | ONNX Runtime detectors: Qualcomm NPU (QNN), NVIDIA GPU (CUDA) or CPU |
 | `bytetrack/` | ByteTrack (vendored, MIT) |
 | `models/` | Model files |
