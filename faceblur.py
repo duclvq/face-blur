@@ -134,28 +134,28 @@ class StreamBlurrer:
     push(frame) returns a FrameResult: the original frame, the blurred frame
     and the face boxes. The input frame is not changed.
 
-    delay (seconds, default 0 = none; e.g. 0.5) holds frames so that later
-    detections fix earlier frames: a new face is followed back through the
-    frames the detector missed it in, and a face found again is filled in the
-    frames between. push() then returns the FrameResult of the frame `delay`
-    seconds earlier (None while the buffer fills); flush() returns the rest
-    at the end of the stream. About halves the faces left unblurred.
+    delay (frames, default 0 = none; e.g. 12, about 0.5 s at 25 fps) holds
+    that many frames so that later detections fix earlier frames: a new face
+    is followed back through the frames the detector missed it in, and a face
+    found again is filled in the frames between. push() then returns the
+    FrameResult of the frame `delay` frames earlier (None while the buffer
+    fills); flush() returns the rest at the end of the stream. About 0.5 s
+    of frames halves the faces left unblurred.
     """
 
     def __init__(self, blurrer, fps, detect_every=1, hold=0.3, low_score=0.3, delay=0):
         from tracker import Analyzer, Lookahead  # imported here: only needed for streams
-        if fps <= 0 or detect_every < 1 or hold < 0 or delay < 0:
-            raise ValueError("need fps > 0, detect_every >= 1, hold >= 0, delay >= 0")
+        if fps <= 0 or detect_every < 1 or hold < 0 or delay < 0 or int(delay) != delay:
+            raise ValueError("need fps > 0, detect_every >= 1, hold >= 0, delay a whole number of frames >= 0")
         self.fb = blurrer
         opts = SimpleNamespace(hold=hold, detect_every=detect_every,
                                min_size=blurrer.min_size, low_score=low_score)
         self.analyzer = Analyzer(opts, fps)
-        frames = round(delay * fps)
-        self.lookahead = Lookahead(self.analyzer, frames) if frames > 0 else None
+        self.lookahead = Lookahead(self.analyzer, int(delay)) if delay > 0 else None
 
     def push(self, frame):
         """Analyse the next frame. Returns its FrameResult; with a delay, the
-        FrameResult of the frame `delay` seconds earlier (None at first)."""
+        FrameResult of the frame `delay` frames earlier (None at first)."""
         if self.lookahead is None:
             return self._result(frame, self.analyzer.push(frame))
         out = self.lookahead.push(frame)
