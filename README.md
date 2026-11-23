@@ -82,6 +82,8 @@ python tools/blur_images.py photos/ photos_blurred/   # a whole folder (same opt
 
 Time per frame on: Mac mini M4 (CPU, whole pipeline) · Qualcomm Dragonwing IQ-9075 EVK · QCS8550 · Snapdragon X Elite CRD · Dragonwing RB3 Gen 2 Vision Kit (QCS6490, 8-bit models). Qualcomm devices: detector on the NPU, via [Qualcomm AI Hub](https://aihub.qualcomm.com).
 
+RB3 Gen 2 runs only 8-bit (w8a8) models on its NPU, about 30x faster than its CPU (yolo11n_1280: 475 ms → 18 ms). The 8-bit models lose a little accuracy (faces left unblurred on 16 street frames, float on CPU → w8a8 on the RB3 NPU): yolo11n_1280 10.8% → 12.0%, yolo11n_640 22.9% → 26.5%, face_det_lite 51.8% → 53.0%. On the other devices the NPU matches the CPU. The RB3 8-bit models are not in the repo yet.
+
 ## Options
 
 The same options exist on the command line (`quickstart.py`, `tools/`) and in Python (`FaceBlurrer(...)` and `fb.stream(...)`).
