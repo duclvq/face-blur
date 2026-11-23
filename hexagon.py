@@ -287,7 +287,7 @@ class QnnFaceDetLite:
 
 YOLO_DIR = MODELS_DIR / "yolo11n_face"
 YOLO_SIZES = {"yolo11n_640": (640, 384), "yolo11n_1280": (1280, 736)}  # fixed model input (w, h)
-YOLO_THRESHOLD = 0.3   # no false faces seen at 0.3 on the test clips
+YOLO_THRESHOLD = 0.25
 YOLO_NMS = 0.45
 
 

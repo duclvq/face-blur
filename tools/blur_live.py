@@ -95,7 +95,7 @@ def main():
                                              "(preview only; nothing is saved).")
     ap.add_argument("source", help="webcam index (0), stream URL, or video file")
     ap.add_argument("--show", action="store_true", help="show the blurred video in a window")
-    ap.add_argument("--low-score", type=float, default=0.3, metavar="S",
+    ap.add_argument("--low-score", type=float, default=0.1, metavar="S",
                     help="ByteTrack second stage: detections scoring S up to the normal "
                          "threshold keep an existing face tracked (never start a new one). "
                          "0 turns it off")

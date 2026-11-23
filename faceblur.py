@@ -49,7 +49,7 @@ class FaceBlurrer:
     min_size -- skip faces smaller than this many pixels
                 (default: 24 for yunet, no limit otherwise)
     threshold -- confidence a detection needs to count as a face, 0..1
-                (default: the model's own, yolo11n 0.3, face_det_lite 0.55,
+                (default: the model's own, yolo11n 0.25, face_det_lite 0.55,
                 yunet 0.7). Lower finds more faces and more false ones
     device   -- where the detector runs: "cpu" (default), "gpu" (NVIDIA,
                 needs onnxruntime-gpu) or "npu" (Qualcomm, needs onnxruntime-qnn).
@@ -118,7 +118,7 @@ class FaceBlurrer:
 
     # ---------------------------------------------------------------- live
 
-    def stream(self, fps, low_score=0.3, delay=0, max_buffered=None):
+    def stream(self, fps, low_score=0.1, delay=0, max_buffered=None):
         """A StreamBlurrer for live frames; see that class."""
         return StreamBlurrer(self, fps, low_score, delay, max_buffered)
 
@@ -162,7 +162,7 @@ class StreamBlurrer:
     To start again with no tracked faces, make a new stream with fb.stream().
     """
 
-    def __init__(self, blurrer, fps, low_score=0.3, delay=0, max_buffered=None):
+    def __init__(self, blurrer, fps, low_score=0.1, delay=0, max_buffered=None):
         from tracker import Analyzer, Lookahead  # imported here: only needed for streams
         if fps <= 0 or (max_buffered is not None and max_buffered < 1):
             raise ValueError("need fps > 0, max_buffered >= 1")

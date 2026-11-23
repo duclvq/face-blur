@@ -31,7 +31,7 @@ from faceblur import FaceBlurrer
 fb = FaceBlurrer(                   # load the model once, then reuse it; defaults shown
     # model="yolo11n_640",          # or "yolo11n_1280" (small faces), "face_det_lite", "yunet"
     # device="cpu",                 # or "gpu" (NVIDIA, onnxruntime-gpu), "npu" (Qualcomm, onnxruntime-qnn)
-    # threshold=None,               # model's own confidence threshold (yolo11n 0.3)
+    # threshold=None,               # model's own confidence threshold (yolo11n 0.25)
     # method="gaussian",            # or "pixelate"
     # strength=3,                   # 1 (light) .. 3 (heavy)
     # shape="oval",                 # or "rect" (whole box)
@@ -43,7 +43,7 @@ live = fb.stream(                   # live video: detector on every frame + trac
     # delay=12,                     # uncomment for more accuracy: hold 12 frames (0.5 s at 25 fps) so
                                     #   faces the detector finds late are blurred in the earlier frames
                                     #   too; about a third fewer misses. Default 0 = no delay
-    # low_score=0.3,                # detections down to this score keep a face already tracked
+    # low_score=0.1,                # detections down to this score keep a face already tracked
     # max_buffered=None,            # most frames held (default: delay + one second of frames)
 )
 
@@ -116,9 +116,9 @@ The same options exist on the command line (`quickstart.py`, `tools/`) and in Py
 |---|---|---|---|---|
 | **`--model`** | `FaceBlurrer(model=)` | `yolo11n_640` | Face detector, see [Models](#models) | `yolo11n_1280`: more small faces, 3 to 4x slower |
 | **`--delay FRAMES`** | `fb.stream(delay=)`, `live.delay = n` any time | `0` (none) | Hold frames so later detections fix earlier ones: a new face is followed back through the earlier frames by its lower-score detections (down to 0.1), a face found again is filled in between | `12` (0.4 s at 30 fps): a third fewer faces left unblurred on two street clips (60 → 38, 82 → 54), output 12 frames late |
-| `--threshold T` | `FaceBlurrer(threshold=)` | model's own: yolo11n 0.3, face_det_lite 0.55, yunet 0.7 | Confidence a detection needs to count as a face (0 to 1) | Lower: more faces found, more false ones |
+| `--threshold T` | `FaceBlurrer(threshold=)` | model's own: yolo11n 0.25, face_det_lite 0.55, yunet 0.7 | Confidence a detection needs to count as a face (0 to 1) | Lower: more faces found, more false ones |
 | `--min-size PX` | `FaceBlurrer(min_size=)` | `0` (`24` for yunet) | Skip faces smaller than PX pixels | Fewer false small faces, misses distant ones |
-| `--low-score S` | `fb.stream(low_score=)` | `0.3` | ByteTrack second stage: detections between this and the threshold keep a known face tracked | `0` turns it off |
+| `--low-score S` | `fb.stream(low_score=)` | `0.1` | ByteTrack second stage: detections between this and the threshold keep a known face tracked | `0` turns it off |
 | `--device cpu\|gpu\|npu` | `FaceBlurrer(device=)` | `cpu` | Where the detector runs: `cpu`, `gpu` (NVIDIA, needs `pip install onnxruntime-gpu[cuda,cudnn]`) or `npu` (Qualcomm, needs `onnxruntime-qnn`). `FaceBlurrer` raises an error if the device is missing | |
 | `--max-buffered N` | `fb.stream(max_buffered=)` | `delay` + one second of frames | Most frames the stream holds. When the output side falls behind and the buffer is full, `put()` drops the oldest frame and counts it in `live.dropped`; a dropped frame is never returned | Memory: up to N frames (6.2 MB each at 1080p). Tracking keeps only the faces found in the last second (under 70 KB in the tests) |
 

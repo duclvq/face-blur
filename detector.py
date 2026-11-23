@@ -193,7 +193,7 @@ _threshold = None  # set by use_threshold(); None = the model's own threshold
 
 def use_threshold(t=None):
     """Set the confidence a detection needs to count as a face (None = the
-    model's default: yolo11n 0.3, face_det_lite 0.55, yunet 0.7)."""
+    model's default: yolo11n 0.25, face_det_lite 0.55, yunet 0.7)."""
     global _threshold
     if t is not None and not 0 < t < 1:
         raise ValueError("threshold must be between 0 and 1")

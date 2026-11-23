@@ -90,7 +90,7 @@ class Analyzer:
     def __init__(self, opts, fps):
         self.o = opts
         self.fps = fps
-        self.low = getattr(opts, "low_score", 0.3)  # 0 = one-stage association only
+        self.low = getattr(opts, "low_score", 0.1)  # 0 = one-stage association only
         self.cut = SceneCut()
         self.i = 0
         self.cut_at = -1         # frame of the last scene cut

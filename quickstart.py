@@ -40,14 +40,14 @@ def main():
                          "unblurred (default 0 = no delay)")
     ap.add_argument("--threshold", type=float, default=None, metavar="T",
                     help="confidence a detection needs to count as a face, 0..1 (default: the "
-                         "model's own, yolo11n 0.3, face_det_lite 0.55, yunet 0.7). Lower finds more faces "
+                         "model's own, yolo11n 0.25, face_det_lite 0.55, yunet 0.7). Lower finds more faces "
                          "and more false ones")
     ap.add_argument("--max-buffered", type=int, default=None, metavar="N",
                     help="most frames held (default: --delay plus one second of frames); when the "
                          "output falls behind and the buffer is full, the oldest frame is dropped")
-    ap.add_argument("--low-score", type=float, default=0.3, metavar="S",
+    ap.add_argument("--low-score", type=float, default=0.1, metavar="S",
                     help="ByteTrack second stage: detections between S and --threshold keep a face "
-                         "that is already tracked (default 0.3; 0 = off)")
+                         "that is already tracked (default 0.1; 0 = off)")
     ap.add_argument("--min-size", type=int, default=None, metavar="PX",
                     help="skip faces smaller than PX pixels (default: 24 for yunet, no limit otherwise)")
     ap.add_argument("--device", choices=["cpu", "gpu", "npu"], default="cpu",
