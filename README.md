@@ -54,12 +54,12 @@ for res in live.flush():            # with a delay, at the end: the frames still
 
 ## Models
 
-| `--model` | Use it for | Mac M4 CPU | IQ-9075 | QCS8550 | X Elite | RB3 Gen 2 |
-|---|---|---|---|---|---|---|
-| `yolo11n_640` (default) | Most scenes, crowds included | 24 ms | 3.7 ms | 2.9 ms | 3.1 ms | 3.0 ms |
-| `yolo11n_1280` | Small, distant faces | 67 ms | 14 ms | 12 ms | 12 ms | 475 ms (CPU) |
-| `face_det_lite` | Fastest on the NPU; misses small faces | 18 ms | 2.7 ms | 1.9 ms | 2.0 ms | 1.4 ms |
-| `yunet` | Simple scenes with a few large faces | 26 ms | 0.6 to 4.6 ms | 0.5 to 4.2 ms | 0.4 to 4.0 ms | 15 to 170 ms (CPU) |
+| `--model` | Use it for | Size | Mac M4 CPU | IQ-9075 | QCS8550 | X Elite | RB3 Gen 2 |
+|---|---|---|---|---|---|---|---|
+| `yolo11n_640` (default) | Most scenes, crowds included | 2.7M params, 11 MB | 24 ms | 3.7 ms | 2.9 ms | 3.1 ms | 3.0 ms |
+| `yolo11n_1280` | Small, distant faces | 2.7M params, 11 MB | 67 ms | 14 ms | 12 ms | 12 ms | 475 ms (CPU) |
+| `face_det_lite` | Fastest on the NPU; misses small faces | 0.9M params, 3.8 MB | 18 ms | 2.7 ms | 1.9 ms | 2.0 ms | 1.4 ms |
+| `yunet` | Simple scenes with a few large faces | 0.05M params, 0.2 MB | 26 ms | 0.6 to 4.6 ms | 0.5 to 4.2 ms | 0.4 to 4.0 ms | 15 to 170 ms (CPU) |
 
 Time per frame on: Mac mini M4 (CPU, whole pipeline) · Qualcomm Dragonwing IQ-9075 EVK · QCS8550 · Snapdragon X Elite CRD · Dragonwing RB3 Gen 2 Vision Kit (QCS6490, 8-bit models). Qualcomm devices: detector on the NPU, via [Qualcomm AI Hub](https://aihub.qualcomm.com).
 
