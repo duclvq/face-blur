@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Face blur launcher for Linux (and macOS).
 # First run: creates a local .venv next to this file and installs the
-# requirements into it. Later runs reuse it. --cpu turns off hardware
-# acceleration (Qualcomm NPU).
+# requirements into it. Later runs reuse it. --device cpu turns off hardware
+# acceleration (Qualcomm NPU or NVIDIA GPU).
 #
 # Usage:
-#   ./run.sh INPUT_FOLDER [OUTPUT_FOLDER] [--method pixelate] [--strength 2] [--cpu] ...
+#   ./run.sh INPUT_FOLDER [OUTPUT_FOLDER] [--method pixelate] [--strength 2] [--device cpu] ...
 #
 # INPUT_FOLDER is a folder of images. Without OUTPUT_FOLDER, results go to
 # INPUT_FOLDER_blurred next to it. For videos, see tools/blur_video.py.
@@ -16,7 +16,7 @@ VENV="$HERE/.venv"
 VPY="$VENV/bin/python"
 
 usage() {
-    echo "Usage: $0 INPUT_FOLDER [OUTPUT_FOLDER] [--method gaussian|pixelate] [--strength 1-3] [--cpu] ..."
+    echo "Usage: $0 INPUT_FOLDER [OUTPUT_FOLDER] [--method gaussian|pixelate] [--strength 1-3] [--device auto|cpu|gpu|npu] ..."
     echo "  INPUT_FOLDER: a folder of images"
     exit 1
 }

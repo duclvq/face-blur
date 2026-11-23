@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 
 import cv2
 import numpy as np
@@ -239,18 +240,24 @@ def draw_faces(frame, boxes, scores):
 
 
 class Stats:
-    """Frame rate and analysis time, drawn on the frame (top left).
+    """Frame rate and analysis time, drawn on the frame (top left), with a
+    graph of the last `history` frames below it: analysis time per frame
+    (green, the dashed line is budget_ms, e.g. 1000 / fps) and face count
+    (orange, own scale).
 
-        stats = Stats()
+        stats = Stats(budget_ms=1000 / fps)
         t = stats.start()
         ... analyse the frame ...
         stats.draw(frame, t, faces=len(boxes), dropped=source.dropped)
     """
 
-    def __init__(self, smooth=0.9):
+    def __init__(self, smooth=0.9, history=300, budget_ms=None):
         self.smooth = smooth
         self.fps = self.ms = self.dt = 0.0
         self.last = None
+        self.budget = budget_ms
+        self.hist_ms = deque(maxlen=history)
+        self.hist_faces = deque(maxlen=history)
 
     def start(self):
         return time.perf_counter()
@@ -265,10 +272,48 @@ class Stats:
             self.dt = k * self.dt + (1 - k) * dt if self.dt else dt
             self.fps = 1.0 / self.dt if self.dt > 0 else 0.0
         self.last = now
+        self.hist_ms.append(ms)
+        self.hist_faces.append(faces)
         text = f"{self.fps:.1f} fps | analysis {self.ms:.0f} ms | faces {faces} | dropped {dropped}"
         scale = max(0.5, frame.shape[0] / 1080)
         (w, h), base = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, 2)
         cv2.rectangle(frame, (0, 0), (w + 20, h + base + 20), (0, 0, 0), -1)
         cv2.putText(frame, text, (10, h + 10), cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 255, 0), 2,
                     cv2.LINE_AA)
+        self._graph(frame, 0, h + base + 20, max(w + 20, int(420 * scale)), int(130 * scale), scale)
         return frame
+
+    def _graph(self, frame, x0, y0, gw, gh, scale):
+        H, W = frame.shape[:2]
+        gw, gh = min(gw, W - x0), min(gh, H - y0)
+        if gw < 40 or gh < 30 or not self.hist_ms:
+            return
+        roi = frame[y0:y0 + gh, x0:x0 + gw]
+        roi[:] = (roi * 0.25).astype(roi.dtype)  # darken, keep a little of the picture
+        pad, fs = int(6 * scale), 0.45 * scale
+        top, bottom = pad + int(14 * scale), gh - pad
+        ms, faces = np.array(self.hist_ms), np.array(self.hist_faces, float)
+        ms_top = max(ms.max(), self.budget or 0) * 1.15
+        faces_top = max(faces.max(), 1) * 1.15
+        n = self.hist_ms.maxlen
+        xs = gw - 1 - (len(ms) - 1 - np.arange(len(ms))) * (gw - 1) / max(n - 1, 1)
+
+        def ys(v, vmax):
+            return bottom - v / vmax * (bottom - top)
+
+        if self.budget:
+            yb = int(ys(self.budget, ms_top))
+            for xd in range(0, gw, int(10 * scale) + 2):
+                cv2.line(roi, (xd, yb), (min(xd + int(5 * scale) + 1, gw - 1), yb), (150, 150, 150), 1)
+        for vals, vmax, color in ((faces, faces_top, (0, 165, 255)), (ms, ms_top, (0, 255, 0))):
+            pts = np.stack([xs, ys(vals, vmax)], 1).round().astype(np.int32)
+            cv2.polylines(roi, [pts], False, color, max(1, int(scale * 1.5)), cv2.LINE_AA)
+        label = f"time {ms[-1]:.0f} ms (max {ms.max():.0f})"
+        if self.budget:
+            label += f" | budget {self.budget:.1f}"
+        cv2.putText(roi, label, (pad, pad + int(10 * scale)), cv2.FONT_HERSHEY_SIMPLEX, fs, (0, 255, 0), 1,
+                    cv2.LINE_AA)
+        flabel = f"faces {faces[-1]:.0f} (max {faces.max():.0f})"
+        (fw, _), _ = cv2.getTextSize(flabel, cv2.FONT_HERSHEY_SIMPLEX, fs, 1)
+        cv2.putText(roi, flabel, (gw - fw - pad, pad + int(10 * scale)), cv2.FONT_HERSHEY_SIMPLEX, fs,
+                    (0, 165, 255), 1, cv2.LINE_AA)

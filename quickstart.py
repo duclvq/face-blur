@@ -47,9 +47,13 @@ def main():
                     help="confidence a detection needs to count as a face, 0..1 (default: the "
                          "model's own, yolo11n 0.3, face_det_lite 0.55, yunet 0.7). Lower finds more faces "
                          "and more false ones")
+    ap.add_argument("--low-score", type=float, default=0.3, metavar="S",
+                    help="ByteTrack second stage: detections between S and --threshold keep a face "
+                         "that is already tracked (default 0.3; 0 = off)")
     ap.add_argument("--min-size", type=int, default=None, metavar="PX",
                     help="skip faces smaller than PX pixels (default: 24 for yunet, no limit otherwise)")
-    ap.add_argument("--cpu", action="store_true", help="face detection on the CPU only (no Qualcomm NPU)")
+    ap.add_argument("--device", choices=["auto", "cpu", "gpu", "npu"], default="auto",
+                    help="where the detector runs: auto (default: the Qualcomm NPU, else an NVIDIA GPU with onnxruntime-gpu, else the CPU), cpu, gpu or npu")
     # how the blur looks
     ap.add_argument("--method", choices=["gaussian", "pixelate"], default="gaussian",
                     help="smooth blur or pixel blocks (default gaussian)")
@@ -71,12 +75,13 @@ def main():
     sink = VideoSink(args.output, video.size, video.fps) if args.output else None
 
     fb = FaceBlurrer(model=args.model, tiles=args.tiles, threshold=args.threshold,  # load once, reuse
-                     min_size=args.min_size, gpu=not args.cpu,
+                     min_size=args.min_size, device=args.device,
                      method=args.method, strength=args.strength, shape=args.shape, pad=args.pad,
                      mask=not args.no_mask)
-    live = fb.stream(fps=video.fps, detect_every=args.detect_every, delay=args.delay)
+    live = fb.stream(fps=video.fps, detect_every=args.detect_every, delay=args.delay,
+                     low_score=args.low_score)
 
-    stats = Stats()                                   # fps and speed, drawn on the frame
+    stats = Stats(budget_ms=1000 / video.fps)        # fps, speed and a graph of time and faces, drawn on the frame
     analysis = [0.0]                                  # seconds the last put() took
 
     def show(res):                                    # one analysed frame -> output; False to stop

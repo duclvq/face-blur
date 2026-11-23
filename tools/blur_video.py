@@ -70,7 +70,7 @@ def main():
     size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
 
     fb = FaceBlurrer(model=a.model)
-    print(fb.device)
+    print(fb.backend)
     live = fb.stream(fps=fps, detect_every=a.detect_every)
     out = Mp4Writer(a.output, size, fps)
     n = 0

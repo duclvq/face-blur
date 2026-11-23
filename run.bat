@@ -5,7 +5,7 @@ rem local .venv next to this file and installs the requirements into it.
 rem Later runs reuse it.
 rem
 rem Usage:
-rem   run.bat INPUT_FOLDER [OUTPUT_FOLDER] [--method pixelate] [--strength 2] [--cpu] ...
+rem   run.bat INPUT_FOLDER [OUTPUT_FOLDER] [--method pixelate] [--strength 2] [--device cpu] ...
 rem   or drag a folder onto run.bat
 rem
 rem INPUT_FOLDER is a folder of images. Without OUTPUT_FOLDER, results go to
@@ -52,7 +52,7 @@ echo [setup] Done.
 
 :args
 if "%~1"=="" (
-    echo Usage: run.bat INPUT_FOLDER [OUTPUT_FOLDER] [--method gaussian^|pixelate] [--strength 1-3] [--cpu]
+    echo Usage: run.bat INPUT_FOLDER [OUTPUT_FOLDER] [--method gaussian^|pixelate] [--strength 1-3] [--device auto^|cpu^|gpu^|npu]
     echo    INPUT_FOLDER: a folder of images
     echo    or: drag a folder onto run.bat
     goto fail

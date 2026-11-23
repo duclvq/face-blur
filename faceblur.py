@@ -52,7 +52,10 @@ class FaceBlurrer:
                 yunet 0.7). Lower finds more faces and more false ones
     tiles    -- also detect on an N x N grid of overlapping tiles (1 = off):
                 finds smaller faces, costs 1 + N*N detector runs per frame
-    gpu      -- use the Qualcomm NPU when there is one (falls back to the CPU)
+    device   -- where the detector runs: "auto" (default: the Qualcomm NPU,
+                else an NVIDIA GPU with onnxruntime-gpu, else the CPU), "cpu",
+                "gpu" or "npu". An explicit device that is missing raises
+                RuntimeError. self.backend names the provider in use
     mask     -- True (default): stream results carry a blurred copy.
                 False: no blurring at all; res.blurred is None and you mask
                 the faces yourself from res.boxes (method, strength, pad and
@@ -61,7 +64,7 @@ class FaceBlurrer:
     """
 
     def __init__(self, model=DEFAULT_MODEL, method="gaussian", strength=3, pad=0.15,
-                 shape="oval", min_size=None, gpu=True, tiles=1, threshold=None, mask=True):
+                 shape="oval", min_size=None, device="auto", tiles=1, threshold=None, mask=True):
         if model not in MODELS:
             raise ValueError(f"model must be one of {MODELS}, not {model!r}")
         if method not in ("gaussian", "pixelate"):
@@ -73,11 +76,11 @@ class FaceBlurrer:
         if shape not in ("oval", "rect"):
             raise ValueError("shape must be 'oval' or 'rect'")
         self.model, self.method, self.strength = model, method, strength
-        self.pad, self.shape, self.gpu, self.mask = pad, shape, gpu, mask
+        self.pad, self.shape, self.device, self.mask = pad, shape, device, mask
         self.min_size = (24 if model == "yunet" else 0) if min_size is None else min_size
 
         try:
-            self.device = detector.use_model(model, cpu=not gpu)
+            self.backend = detector.use_model(model, device)
             detector.use_tiles(tiles)
             detector.use_threshold(threshold)
         except SystemExit as e:  # detector exits when a model cannot start
@@ -117,9 +120,9 @@ class FaceBlurrer:
 
     # ---------------------------------------------------------------- live
 
-    def stream(self, fps, detect_every=1, low_score=0.3, delay=0):
+    def stream(self, fps, detect_every=1, low_score=0.3, delay=0, max_state_mb=100):
         """A StreamBlurrer for live frames; see that class."""
-        return StreamBlurrer(self, fps, detect_every, low_score, delay)
+        return StreamBlurrer(self, fps, detect_every, low_score, delay, max_state_mb)
 
 
 class StreamBlurrer:
@@ -127,9 +130,9 @@ class StreamBlurrer:
 
     Faces are tracked with ByteTrack (Kalman filter + two-stage matching:
     low-score detections, low_score .. the normal threshold, keep an existing
-    face tracked; 0 = off). Between detector runs (detect_every) and for a
-    face the detector just lost, the box follows optical flow; a lost face
-    stays blurred for 0.3 s (tracker.HOLD).
+    face tracked; 0 = off). Between detector runs (detect_every) the box
+    follows optical flow. A face the detector loses is not blurred any longer
+    (no hold); with a delay, the frames between are filled if it is found again.
 
     push(frame) returns a FrameResult: the original frame, the blurred frame
     and the face boxes. The input frame is not changed.
@@ -152,15 +155,22 @@ class StreamBlurrer:
 
     push(frame) = put(frame) then get(): with delay=0 it returns this frame's
     result at once; with a delay, None until `delay` frames are buffered.
+
+    For a stream that runs for days: reset() forgets every tracked face (the
+    next frame is analysed from scratch, as after a scene cut; buffered frames
+    keep their boxes). The stream also resets itself when its tracking state
+    passes max_state_mb (default 100; live.state_mb shows it, live.resets
+    counts both kinds). The frames held for `delay` are not part of that
+    limit: they are yours, see live.buffered.
     """
 
-    def __init__(self, blurrer, fps, detect_every=1, low_score=0.3, delay=0):
+    def __init__(self, blurrer, fps, detect_every=1, low_score=0.3, delay=0, max_state_mb=100):
         from tracker import Analyzer, Lookahead  # imported here: only needed for streams
-        if fps <= 0 or detect_every < 1:
-            raise ValueError("need fps > 0, detect_every >= 1")
+        if fps <= 0 or detect_every < 1 or max_state_mb <= 0:
+            raise ValueError("need fps > 0, detect_every >= 1, max_state_mb > 0")
         self.fb = blurrer
-        opts = SimpleNamespace(detect_every=detect_every,
-                               min_size=blurrer.min_size, low_score=low_score)
+        opts = SimpleNamespace(detect_every=detect_every, min_size=blurrer.min_size,
+                               low_score=low_score, max_state_mb=max_state_mb)
         self.analyzer = Analyzer(opts, fps)
         self.buffer = Lookahead(self.analyzer)
         self.delay = delay
@@ -180,6 +190,21 @@ class StreamBlurrer:
     def buffered(self):
         """Frames held now."""
         return len(self.buffer)
+
+    @property
+    def state_mb(self):
+        """Memory held by the tracking state, in MB (estimate)."""
+        return self.analyzer.state_bytes / 1e6
+
+    @property
+    def resets(self):
+        """Times the tracking state was cleared: reset() calls and max_state_mb."""
+        return self.analyzer.stats["resets"]
+
+    def reset(self):
+        """Forget every tracked face. Applied at the next put(); safe to call
+        from the output thread."""
+        self.analyzer.reset()
 
     @property
     def ready(self):

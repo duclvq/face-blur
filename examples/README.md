@@ -23,4 +23,6 @@ Image credits: `team/*` and `crowd/*` are NASA photos (public domain, images.nas
 
 `video/models_compare.*` is 15 s of https://www.youtube.com/watch?v=7F0Cy-RGOGY (Chongqing bar street at night; not public domain, copyright belongs to its owner) blurred by each built-in model; made with `FaceBlurrer.stream()` at its defaults.
 
+`video/subway_before_after.*` is 12 s of https://www.youtube.com/watch?v=jN5OKuOTTJc (a subway train; not public domain, copyright belongs to its owner): the original on top, below it every frame through `FaceBlurrer(model="yolo11n_1280", device="gpu").stream(fps=60, delay=30, low_score=0.2)` with the `videoio.Stats` overlay.
+
 `video/street_before_after.*` shows `crowd_street.mp4` (from https://www.youtube.com/watch?v=b8QZJ5ZodTs, not public domain) before and after `tools/blur_video.py` with the default model.

@@ -359,3 +359,16 @@ def qnn_available():
     except ImportError:
         return False
     return "QNNExecutionProvider" in ort.get_available_providers()
+
+
+def cuda_providers():
+    """Providers for an NVIDIA GPU (onnxruntime-gpu), or None without one."""
+    try:
+        import onnxruntime as ort
+    except ImportError:
+        return None
+    if "CUDAExecutionProvider" not in ort.get_available_providers():
+        return None
+    if hasattr(ort, "preload_dlls"):  # CUDA and cuDNN DLLs from the nvidia-* pip packages
+        ort.preload_dlls()
+    return ["CUDAExecutionProvider", "CPUExecutionProvider"]

@@ -1,8 +1,8 @@
 """Face detectors and the blur itself.
 
-use_model(name) picks the detector for this process (face_det_lite,
-yolo11n_640, yolo11n_1280, yunet; use_npu() for the
-Qualcomm NPU builds); then
+use_model(name, device) picks the detector for this process (face_det_lite,
+yolo11n_640, yolo11n_1280, yunet) and where it runs (DEVICES); use_npu() for
+the quantized YuNet NPU builds; then
 detect_faces_scored(img) returns (x, y, w, h, score) boxes, and
 blur_region(img, box) blurs one box in place.
 """
@@ -102,29 +102,42 @@ _npu = None
 QNN_CACHE = Path.home() / ".cache" / "face-blur" / "qnn"
 
 
-def use_npu(model="face_det_lite", size=None, precision=None, allow_cpu=False,
-            cache_dir=QNN_CACHE, force_cpu=False):
-    """Switch face detection to a Qualcomm Hexagon NPU (onnxruntime QNN EP,
-    HTP backend).
+DEVICES = ("auto", "cpu", "gpu", "npu")
+PROVIDER = {"npu": "QNNExecutionProvider", "gpu": "CUDAExecutionProvider", "cpu": "CPUExecutionProvider"}
+
+
+def use_npu(model="face_det_lite", size=None, precision=None, device="npu", cache_dir=QNN_CACHE):
+    """Run face detection through onnxruntime on `device`:
+    "npu" (Qualcomm Hexagon, onnxruntime-qnn), "gpu" (NVIDIA, onnxruntime-gpu),
+    "cpu", or "auto" (the first of npu, gpu, cpu that is there).
 
     model: "face_det_lite" (default; Qualcomm Lightweight-Face-Detection,
     float), "yolo11n_640" / "yolo11n_1280" (YOLO11n-face, float) or "yunet"
     (fixed-size quantized YuNet from tools/make_yunet_qnn.py;
     size (w, h) / precision: see hexagon.SIZES / hexagon.PRECISIONS).
-    allow_cpu: run the same model on the CPU EP when QNN is missing.
-    force_cpu: always run it on the CPU EP.
-    Returns a message naming the provider in use. Falls back to the normal
-    CPU detector with a warning if QNN is unavailable.
+    Returns a message naming the provider in use, or a "WARNING: ..." message
+    (and no change) when the device is missing or does not start.
     """
     global _npu
+    if device not in DEVICES:
+        raise ValueError(f"device must be one of {DEVICES}, not {device!r}")
     try:
         import hexagon
     except ImportError:
-        return "WARNING: --npu needs onnxruntime-qnn (pip install onnxruntime-qnn); using CPU"
-    providers = ["CPUExecutionProvider"] if force_cpu else None
-    if providers is None and not hexagon.qnn_available():
-        if not allow_cpu:
-            return "WARNING: onnxruntime has no QNN support (pip install onnxruntime-qnn); using CPU"
+        return "WARNING: onnxruntime is not installed"
+    strict = device != "auto"
+    if device == "auto":
+        device = "npu" if hexagon.qnn_available() else "gpu" if hexagon.cuda_providers() else "cpu"
+    if device == "npu":
+        if not hexagon.qnn_available():
+            return "WARNING: device 'npu' needs a Qualcomm device and onnxruntime-qnn (pip install onnxruntime-qnn)"
+        providers = None  # QNN, then the CPU for nodes QNN does not take
+    elif device == "gpu":
+        providers = hexagon.cuda_providers()
+        if providers is None:
+            return ("WARNING: device 'gpu' needs an NVIDIA GPU and onnxruntime-gpu "
+                    "(pip install onnxruntime-gpu[cuda,cudnn])")
+    else:
         providers = ["CPUExecutionProvider"]
     try:
         if model in hexagon.YOLO_SIZES:
@@ -134,10 +147,10 @@ def use_npu(model="face_det_lite", size=None, precision=None, allow_cpu=False,
                                    providers=providers, cache_dir=cache_dir)
         else:
             det = hexagon.QnnFaceDetLite(providers=providers, cache_dir=cache_dir)
-    except Exception as e:  # missing model, QNN backend library that fails to load, ...
-        return f"WARNING: NPU detector could not start ({e}); using CPU"
-    if not det.on_npu and not allow_cpu:
-        return f"WARNING: QNN did not start (providers {det.providers}); using CPU"
+    except Exception as e:  # missing model, a backend library that fails to load, ...
+        return f"WARNING: the detector could not start on {device} ({e})"
+    if strict and det.provider != PROVIDER[device]:
+        return f"WARNING: {PROVIDER[device]} did not start (providers {det.providers})"
     _npu = det
     return f"Face detection: {det.name} on {', '.join(det.providers)}"
 
@@ -157,16 +170,23 @@ DEFAULT_MODEL = "yolo11n_640"
 _selected = False  # use_model() called; if not, the first detection loads DEFAULT_MODEL
 
 
-def use_model(name, cpu=False):
-    """Select the face detector. Returns a message describing it."""
+def use_model(name, device="auto"):
+    """Select the face detector and where it runs: "auto" (default: the NPU,
+    else the GPU, else the CPU), "cpu", "gpu" or "npu". An explicit device that
+    is missing exits with a message. Returns a message describing the detector."""
     global _npu, _selected
+    if name not in MODELS:
+        raise ValueError(f"model must be one of {MODELS}, not {name!r}")
+    if device not in DEVICES:
+        raise ValueError(f"device must be one of {DEVICES}, not {device!r}")
     _npu = None
     _selected = True
     if name == "yunet":
-        return "Face detector: YuNet (OpenCV)"
-    if name not in MODELS:
-        raise ValueError(f"model must be one of {MODELS}, not {name!r}")
-    msg = use_npu(name, allow_cpu=True, force_cpu=cpu)
+        if device in ("gpu", "npu"):
+            sys.exit(f"WARNING: yunet runs on the CPU (OpenCV), not on the {device}; "
+                     "for the NPU build see tools/blur_live.py --npu yunet")
+        return "Face detector: YuNet (OpenCV, CPU)"
+    msg = use_npu(name, device=device)
     if msg.startswith("WARNING"):
         sys.exit(msg)
     return msg.replace("Face detection:", "Face detector:")

@@ -144,9 +144,8 @@ def main():
                     help="margin around each face as a fraction of its size (0 = tight)")
     ap.add_argument("--shape", choices=["rect", "oval"], default="oval",
                     help="blur the whole box or an oval that follows the face")
-    ap.add_argument("--cpu", action="store_true",
-                    help="run the detector on the CPU only (by default the Qualcomm NPU "
-                         "is used when there is one)")
+    ap.add_argument("--device", choices=["auto", "cpu", "gpu", "npu"], default="auto",
+                    help="where the detector runs: auto (default: the Qualcomm NPU, else an NVIDIA GPU with onnxruntime-gpu, else the CPU), cpu, gpu or npu")
     args = ap.parse_args()
     if not 0 <= args.pad <= 1:
         ap.error(f"--pad is a fraction of the face size between 0 and 1, not pixels "
@@ -155,7 +154,7 @@ def main():
         args.min_size = 24 if args.model == "yunet" else 0
     if not YUNET_MODEL.exists():
         sys.exit(f"Model not found: {YUNET_MODEL}")
-    print(use_model(args.model, args.cpu))
+    print(use_model(args.model, args.device))
     process_dataset(args.input_dir, args.output_dir, args.method, args.strength,
                     args.min_size, args.pad, args.shape)
 
