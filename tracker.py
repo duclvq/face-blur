@@ -25,6 +25,7 @@ How it works:
 """
 import math
 import time
+import threading
 from collections import deque
 from types import SimpleNamespace
 
@@ -253,7 +254,7 @@ class Analyzer:
 # --------------------------------------------------------------------------- optional delay
 
 class Lookahead:
-    """Hold `delay` frames, so what is found later fixes them:
+    """A buffer of analysed frames, so what is found later fixes them:
 
       * a face seen for the first time is followed back with optical flow
         through the held frames (the detector missed its first frames, or it
@@ -261,46 +262,59 @@ class Lookahead:
       * a face found again after it was lost (same ByteTrack id) is filled in
         the frames between, by interpolating its box.
 
-    push(frame) returns the (frame, faces) pairs that leave the buffer, oldest
-    first: one per push once `delay` frames are held, none while it fills.
-    `delay` can be changed while running: a larger one returns nothing until
-    the buffer has grown; a smaller one returns the extra old frames at once
-    (the caller keeps the newest). flush() returns the rest.
+    put(frame) analyses a frame and adds it; pop() takes the oldest out as
+    (frame, faces); len() is the number held. The caller decides when to pop,
+    i.e. how many frames to keep. put() and pop() may run in two threads.
+    push(frame) = put, then pop while more than `delay` are held.
     """
 
-    def __init__(self, analyzer, delay):
+    def __init__(self, analyzer, delay=0):
         self.an, self.delay = analyzer, int(delay)
         self.buf = deque()       # [i, frame, gray, faces or None]
         self.seen = {}           # track id -> (frame index, box) where last present
         self.i = 0
+        self.lock = threading.Lock()
+
+    def __len__(self):
+        return len(self.buf)
+
+    def put(self, frame):
+        faces = self.an.push(frame)          # the slow part, outside the lock
+        gray = self.an.prev_gray if faces is not None else None
+        with self.lock:
+            i = self.i
+            self.i += 1
+            if faces is not None:
+                faces = list(faces)
+                for f in faces:
+                    tid, box = f[5], np.array([f[0], f[1], f[0] + f[2], f[1] + f[3]], float)
+                    last = self.seen.get(tid)
+                    if last is None:
+                        self._back(f, box, gray)
+                    elif i - last[0] > 1:
+                        self._gap(f, last, i, box)
+                    self.seen[tid] = (i, box)
+            self.buf.append([i, frame, gray, faces])
+            if i % 100 == 0:  # forget faces last seen before the buffer
+                first = self.buf[0][0]
+                self.seen = {k: v for k, v in self.seen.items() if v[0] >= first - 1}
+
+    def pop(self):
+        """The oldest (frame, faces), or None if empty."""
+        with self.lock:
+            return self._emit(self.buf.popleft()) if self.buf else None
 
     def push(self, frame):
-        i = self.i
-        self.i += 1
-        faces = self.an.push(frame)
-        gray = self.an.prev_gray if faces is not None else None
-        if faces is not None:
-            faces = list(faces)
-            for f in faces:
-                tid, box = f[5], np.array([f[0], f[1], f[0] + f[2], f[1] + f[3]], float)
-                last = self.seen.get(tid)
-                if last is None:
-                    self._back(f, box, gray)
-                elif i - last[0] > 1:
-                    self._gap(f, last, i, box)
-                self.seen[tid] = (i, box)
-        self.buf.append([i, frame, gray, faces])
+        self.put(frame)
         out = []
         while len(self.buf) > self.delay:
-            out.append(self._emit(self.buf.popleft()))
-        if i % 100 == 0:  # forget faces last seen before the buffer
-            first = self.buf[0][0] if self.buf else i
-            self.seen = {k: v for k, v in self.seen.items() if v[0] >= first - 1}
+            out.append(self.pop())
         return out
 
     def flush(self):
-        out = [self._emit(e) for e in self.buf]
-        self.buf.clear()
+        with self.lock:
+            out = [self._emit(e) for e in self.buf]
+            self.buf.clear()
         return out
 
     @staticmethod

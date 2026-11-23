@@ -79,8 +79,8 @@ def main():
             ok, frame = cap.read()
             if not ok:
                 break
-            res = live.push(frame)
-            if not res.repeated:            # a file keeps every frame once (repeats are for live output)
+            live.put(frame)
+            while (res := live.get()) is not None:
                 out.write(res.blurred)
                 n += 1
         for res in live.flush():            # the frames still held at the end

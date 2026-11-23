@@ -91,10 +91,15 @@ def main():
         cv2.imshow("face-blur (q to quit)", out)
         return cv2.waitKey(1) & 0xFF != ord("q")
 
+    stop = False
     for frame in video:
         t = stats.start()
-        res = live.push(frame)                        # analyse one frame; always one result back
-        if not show(res, t):
+        live.put(frame)                               # analyse one frame, add it to the buffer
+        while (res := live.get()) is not None:        # the frames that have `--delay` newer ones behind
+            if not show(res, t):
+                stop = True
+                break
+        if stop:
             break
     else:
         for res in live.flush():                      # --delay: the frames still held at the end

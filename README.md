@@ -37,17 +37,22 @@ live = fb.stream(                   # live video: detector + tracker between fra
 )
 
 for frame in frames:                # BGR numpy arrays (H x W x 3, uint8)
-    # live.delay = 25               # the delay can be changed in the loop, e.g. if the fps changes;
-                                    #   it moves there smoothly, 1 frame per 4 (never a gap in the output)
-    res = live.push(frame)          # always one result per frame; with delay=12: the frame 12 earlier
-                                    #   (res.repeated: the previous frame again while the delay grows)
-    res.original                    # the input frame, unchanged
-    res.blurred                     # a blurred copy (None with mask=False)
-    res.boxes                       # the blurred faces: [(x, y, w, h), ...]
-    res.scores                      # the confidence of each face
-for res in live.flush():            # with a delay, at the end of a file: the frames still held
+    live.put(frame)                 # input side: analyse the frame, add it to the buffer
+    # live.delay = 25               # the buffer is yours: change the delay any time (live.buffered:
+                                    #   frames held now, live.ready: frames get() can return now)
+    while (res := live.get()) is not None:   # output side: each frame with `delay` newer ones behind
+        res.original                #   the input frame, unchanged
+        res.blurred                 #   a blurred copy (None with mask=False)
+        res.boxes                   #   the blurred faces: [(x, y, w, h), ...]
+        res.scores                  #   the confidence of each face
+for res in live.flush():            # with a delay, at the end: the frames still held
     ...
 ```
+
+`put()` and `get()` can also run in two threads, so the output keeps its own clock (a fixed
+frame rate) whatever the input does: call `live.get()` on each output tick, reuse the last
+result when it returns `None` (input late), and call `live.get(force=True)` to shrink the
+buffer when `live.buffered` grows past what you want. `live.push(frame)` is `put` then `get`.
 
 Images (no tracking, no delay):
 
@@ -87,13 +92,13 @@ The same options exist on the command line (`quickstart.py`, `tools/`) and in Py
 > **The three settings that matter most** (in bold below):
 > - **`--model`**: `yolo11n_640` (default) or `yolo11n_1280` for small faces.
 > - **`--detect-every N`**: run the detector every N frames (default `1`); raise it on a slow machine.
-> - **`--delay FRAMES`**: hold the output this many frames so later frames fix earlier ones (default `0`; about 0.5 s worth, e.g. `12` at 25 fps, leaves half as many faces unblurred). Can be changed in the loop (`live.delay = n`); the output never stalls, the delay moves there one frame per 4.
+> - **`--delay FRAMES`**: hold the output this many frames so later frames fix earlier ones (default `0`; about 0.5 s worth, e.g. `12` at 25 fps, leaves half as many faces unblurred). Can be changed any time (`live.delay = n`); `put()` and `get()` are separate, so you decide when frames leave the buffer.
 
 | Command line | Python | Default | What it does | Trade-off |
 |---|---|---|---|---|
 | **`--model`** | `FaceBlurrer(model=)` | `yolo11n_640` | Face detector, see [Models](#models) | `yolo11n_1280`: more small faces, 3 to 4x slower |
 | **`--detect-every N`** | `fb.stream(detect_every=)` | `1` | Run the detector every N frames; tracking moves faces in between | N times less detector work; misses more fast or new faces |
-| **`--delay FRAMES`** | `fb.stream(delay=)`, `live.delay = n` in the loop | `0` (none) | Hold frames so later detections fix earlier ones: a new face is followed back to the frames the detector missed, a face found again is filled in between | `12` at 25 fps (0.5 s): about half as many faces left unblurred, output 12 frames late |
+| **`--delay FRAMES`** | `fb.stream(delay=)`, `live.delay = n` any time | `0` (none) | Hold frames so later detections fix earlier ones: a new face is followed back to the frames the detector missed, a face found again is filled in between | `12` at 25 fps (0.5 s): about half as many faces left unblurred, output 12 frames late |
 | `--threshold T` | `FaceBlurrer(threshold=)` | model's own: yolo11n 0.3, face_det_lite 0.55, yunet 0.7 | Confidence a detection needs to count as a face (0 to 1) | Lower: more faces found, more false ones |
 | `--tiles N` | `FaceBlurrer(tiles=)` | `1` (off) | Also detect on an N x N grid of overlapping tiles, so small faces are seen larger | 1 + N×N detector runs per frame. Helps `face_det_lite`; YOLO rarely needs it |
 | `--min-size PX` | `FaceBlurrer(min_size=)` | `0` (`24` for yunet) | Skip faces smaller than PX pixels | Fewer false small faces, misses distant ones |
