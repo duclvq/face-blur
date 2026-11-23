@@ -10,8 +10,9 @@ graphs). Expect to adjust things on the first real device.
 Qualcomm's [Lightweight-Face-Detection](https://huggingface.co/qualcomm/Lightweight-Face-Detection)
 (BSD-3-Clause, 878K parameters), Qualcomm AI Hub release v0.67.0, **float**
 precision (the most accurate one; the HTP runs it in fp16, as AI Hub does).
-It runs on the NPU when onnxruntime has the QNN execution provider
-(`onnxruntime-qnn`), on the CPU otherwise.
+It runs on the NPU with `--device npu` / `FaceBlurrer(device="npu")`, which
+needs onnxruntime with the QNN execution provider (`onnxruntime-qnn`); the
+default device is the CPU.
 
 | File (`models/face_det_lite/`) | |
 |---|---|
@@ -74,13 +75,13 @@ Then copy the repo (the models are in `models/`; rebuild with
 ## Run
 
 ```bash
-python tools/blur_live.py 0 --show                            # face_det_lite when onnxruntime-qnn is installed
-python tools/blur_live.py 0 --show --npu                      # the same, and warn if QNN is missing
+python tools/blur_live.py 0 --show --model face_det_lite --device npu   # face_det_lite on the NPU
+python tools/blur_live.py 0 --show --npu                      # the same
 python tools/blur_live.py 0 --show --npu yunet               # YuNet 960x544 a16w8
 python tools/blur_live.py in.mp4 --show --npu yunet:640x384 --npu-precision a8w8
 ```
 
-From code: `FaceBlurrer(model="face_det_lite")`, `detector.use_npu("face_det_lite")`,
+From code: `FaceBlurrer(model="face_det_lite", device="npu")`, `detector.use_npu("face_det_lite")`,
 `detector.use_npu("yunet", (960, 544), "a16w8")`, or `hexagon.QnnFaceDetLite` /
 `hexagon.QnnYuNet`.
 

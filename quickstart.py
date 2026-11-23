@@ -52,8 +52,8 @@ def main():
                          "that is already tracked (default 0.3; 0 = off)")
     ap.add_argument("--min-size", type=int, default=None, metavar="PX",
                     help="skip faces smaller than PX pixels (default: 24 for yunet, no limit otherwise)")
-    ap.add_argument("--device", choices=["auto", "cpu", "gpu", "npu"], default="auto",
-                    help="where the detector runs: auto (default: the Qualcomm NPU, else an NVIDIA GPU with onnxruntime-gpu, else the CPU), cpu, gpu or npu")
+    ap.add_argument("--device", choices=["cpu", "gpu", "npu"], default="cpu",
+                    help="where the detector runs: cpu (default), gpu (NVIDIA, needs onnxruntime-gpu) or npu (Qualcomm, needs onnxruntime-qnn)")
     # how the blur looks
     ap.add_argument("--method", choices=["gaussian", "pixelate"], default="gaussian",
                     help="smooth blur or pixel blocks (default gaussian)")

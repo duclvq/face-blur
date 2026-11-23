@@ -52,10 +52,10 @@ class FaceBlurrer:
                 yunet 0.7). Lower finds more faces and more false ones
     tiles    -- also detect on an N x N grid of overlapping tiles (1 = off):
                 finds smaller faces, costs 1 + N*N detector runs per frame
-    device   -- where the detector runs: "auto" (default: the Qualcomm NPU,
-                else an NVIDIA GPU with onnxruntime-gpu, else the CPU), "cpu",
-                "gpu" or "npu". An explicit device that is missing raises
-                RuntimeError. self.backend names the provider in use
+    device   -- where the detector runs: "cpu" (default), "gpu" (NVIDIA,
+                needs onnxruntime-gpu) or "npu" (Qualcomm, needs onnxruntime-qnn).
+                A device that is missing raises RuntimeError. self.backend
+                names the provider in use
     mask     -- True (default): stream results carry a blurred copy.
                 False: no blurring at all; res.blurred is None and you mask
                 the faces yourself from res.boxes (method, strength, pad and
@@ -64,7 +64,7 @@ class FaceBlurrer:
     """
 
     def __init__(self, model=DEFAULT_MODEL, method="gaussian", strength=3, pad=0.15,
-                 shape="oval", min_size=None, device="auto", tiles=1, threshold=None, mask=True):
+                 shape="oval", min_size=None, device="cpu", tiles=1, threshold=None, mask=True):
         if model not in MODELS:
             raise ValueError(f"model must be one of {MODELS}, not {model!r}")
         if method not in ("gaussian", "pixelate"):

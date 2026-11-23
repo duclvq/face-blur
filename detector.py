@@ -102,14 +102,14 @@ _npu = None
 QNN_CACHE = Path.home() / ".cache" / "face-blur" / "qnn"
 
 
-DEVICES = ("auto", "cpu", "gpu", "npu")
+DEVICES = ("cpu", "gpu", "npu")
 PROVIDER = {"npu": "QNNExecutionProvider", "gpu": "CUDAExecutionProvider", "cpu": "CPUExecutionProvider"}
 
 
 def use_npu(model="face_det_lite", size=None, precision=None, device="npu", cache_dir=QNN_CACHE):
     """Run face detection through onnxruntime on `device`:
-    "npu" (Qualcomm Hexagon, onnxruntime-qnn), "gpu" (NVIDIA, onnxruntime-gpu),
-    "cpu", or "auto" (the first of npu, gpu, cpu that is there).
+    "npu" (Qualcomm Hexagon, onnxruntime-qnn), "gpu" (NVIDIA, onnxruntime-gpu)
+    or "cpu".
 
     model: "face_det_lite" (default; Qualcomm Lightweight-Face-Detection,
     float), "yolo11n_640" / "yolo11n_1280" (YOLO11n-face, float) or "yunet"
@@ -125,9 +125,6 @@ def use_npu(model="face_det_lite", size=None, precision=None, device="npu", cach
         import hexagon
     except ImportError:
         return "WARNING: onnxruntime is not installed"
-    strict = device != "auto"
-    if device == "auto":
-        device = "npu" if hexagon.qnn_available() else "gpu" if hexagon.cuda_providers() else "cpu"
     if device == "npu":
         if not hexagon.qnn_available():
             return "WARNING: device 'npu' needs a Qualcomm device and onnxruntime-qnn (pip install onnxruntime-qnn)"
@@ -149,7 +146,7 @@ def use_npu(model="face_det_lite", size=None, precision=None, device="npu", cach
             det = hexagon.QnnFaceDetLite(providers=providers, cache_dir=cache_dir)
     except Exception as e:  # missing model, a backend library that fails to load, ...
         return f"WARNING: the detector could not start on {device} ({e})"
-    if strict and det.provider != PROVIDER[device]:
+    if det.provider != PROVIDER[device]:
         return f"WARNING: {PROVIDER[device]} did not start (providers {det.providers})"
     _npu = det
     return f"Face detection: {det.name} on {', '.join(det.providers)}"
@@ -170,10 +167,10 @@ DEFAULT_MODEL = "yolo11n_640"
 _selected = False  # use_model() called; if not, the first detection loads DEFAULT_MODEL
 
 
-def use_model(name, device="auto"):
-    """Select the face detector and where it runs: "auto" (default: the NPU,
-    else the GPU, else the CPU), "cpu", "gpu" or "npu". An explicit device that
-    is missing exits with a message. Returns a message describing the detector."""
+def use_model(name, device="cpu"):
+    """Select the face detector and where it runs: "cpu" (default), "gpu"
+    (NVIDIA) or "npu" (Qualcomm). A device that is missing exits with a
+    message. Returns a message describing the detector."""
     global _npu, _selected
     if name not in MODELS:
         raise ValueError(f"model must be one of {MODELS}, not {name!r}")

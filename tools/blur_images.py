@@ -144,8 +144,8 @@ def main():
                     help="margin around each face as a fraction of its size (0 = tight)")
     ap.add_argument("--shape", choices=["rect", "oval"], default="oval",
                     help="blur the whole box or an oval that follows the face")
-    ap.add_argument("--device", choices=["auto", "cpu", "gpu", "npu"], default="auto",
-                    help="where the detector runs: auto (default: the Qualcomm NPU, else an NVIDIA GPU with onnxruntime-gpu, else the CPU), cpu, gpu or npu")
+    ap.add_argument("--device", choices=["cpu", "gpu", "npu"], default="cpu",
+                    help="where the detector runs: cpu (default), gpu (NVIDIA, needs onnxruntime-gpu) or npu (Qualcomm, needs onnxruntime-qnn)")
     args = ap.parse_args()
     if not 0 <= args.pad <= 1:
         ap.error(f"--pad is a fraction of the face size between 0 and 1, not pixels "

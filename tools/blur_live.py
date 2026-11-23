@@ -119,8 +119,8 @@ def main():
                     help="smallest face size in px (default: 8 for yunet, no limit otherwise)")
     ap.add_argument("--pad", type=float, default=0.2, help="margin around each face, 0..1")
     ap.add_argument("--shape", choices=["rect", "oval"], default="oval")
-    ap.add_argument("--device", choices=["auto", "cpu", "gpu", "npu"], default="auto",
-                    help="where the detector runs: auto (default: the Qualcomm NPU, else an NVIDIA GPU with onnxruntime-gpu, else the CPU), cpu, gpu or npu")
+    ap.add_argument("--device", choices=["cpu", "gpu", "npu"], default="cpu",
+                    help="where the detector runs: cpu (default), gpu (NVIDIA, needs onnxruntime-gpu) or npu (Qualcomm, needs onnxruntime-qnn)")
     ap.add_argument("--npu", nargs="?", const="face_det_lite", metavar="MODEL",
                     help="face detection on a Qualcomm Hexagon NPU (onnxruntime-qnn): "
                          "face_det_lite (default; Qualcomm Lightweight-Face-Detection, float) or "
@@ -142,6 +142,7 @@ def main():
         if o.model != npu_model:
             print(f"--npu uses {npu_model} (not {o.model})")
         o.model = npu_model
+        o.device = "cpu" if o.npu_allow_cpu else "npu"
     if o.detect_every < 1 or not 0 <= o.pad <= 1:
         ap.error("--detect-every >= 1, --pad 0..1")
     if o.min_size is None:
@@ -162,7 +163,7 @@ def main():
     print(use_model(o.model, o.device))
     npu_msg = None
     if npu_model == "yunet":
-        npu_msg = use_npu("yunet", npu_size, o.npu_precision, device="auto" if o.npu_allow_cpu else "npu")
+        npu_msg = use_npu("yunet", npu_size, o.npu_precision, device=o.device)
     elif npu_model:  # face_det_lite: use_model loaded it, on the NPU when QNN is there
         if not detector._npu.on_npu and not o.npu_allow_cpu:
             npu_msg = "WARNING: onnxruntime has no QNN support (pip install onnxruntime-qnn); using CPU"

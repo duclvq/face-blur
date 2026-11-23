@@ -30,7 +30,7 @@ from faceblur import FaceBlurrer
 
 fb = FaceBlurrer(                   # load the model once, then reuse it; defaults shown
     # model="yolo11n_640",          # or "yolo11n_1280" (small faces), "face_det_lite", "yunet"
-    # device="auto",                # Qualcomm NPU, else NVIDIA GPU, else CPU; or "cpu", "gpu", "npu"
+    # device="cpu",                 # or "gpu" (NVIDIA, onnxruntime-gpu), "npu" (Qualcomm, onnxruntime-qnn)
     # threshold=None,               # model's own confidence threshold (yolo11n 0.3)
     # tiles=1,                      # N x N extra tiles for small faces
     # method="gaussian",            # or "pixelate"
@@ -97,7 +97,7 @@ python tools/blur_images.py photos/ photos_blurred/   # a whole folder (same opt
 | `face_det_lite` | Fastest on the NPU; misses small faces | 0.9M params, 3.8 MB | 18 ms | 2.7 ms | 1.9 ms | 2.0 ms | 1.4 ms |
 | `yunet` | Simple scenes with a few large faces | 0.05M params, 0.2 MB | 26 ms | 0.6 to 4.6 ms | 0.5 to 4.2 ms | 0.4 to 4.0 ms | 15 to 170 ms (CPU) |
 
-Time per frame on: Mac mini M4 (CPU, whole pipeline) · Qualcomm Dragonwing IQ-9075 EVK · QCS8550 · Snapdragon X Elite CRD · Dragonwing RB3 Gen 2 Vision Kit (QCS6490, 8-bit models). Qualcomm devices: detector on the NPU, via [Qualcomm AI Hub](https://aihub.qualcomm.com).
+Time per frame on: Mac mini M4 (CPU, whole pipeline) · Qualcomm Dragonwing IQ-9075 EVK · QCS8550 · Snapdragon X Elite CRD · Dragonwing RB3 Gen 2 Vision Kit (QCS6490, 8-bit models). Qualcomm devices: detector on the NPU (`--device npu`), via [Qualcomm AI Hub](https://aihub.qualcomm.com).
 
 RB3 Gen 2 runs only 8-bit (w8a8) models on its NPU, about 30x faster than its CPU (yolo11n_1280: 475 ms → 18 ms). The 8-bit models lose a little accuracy (faces left unblurred on 16 street frames, float on CPU → w8a8 on the RB3 NPU): yolo11n_1280 10.8% → 12.0%, yolo11n_640 22.9% → 26.5%, face_det_lite 51.8% → 53.0%. On the other devices the NPU matches the CPU. The RB3 8-bit models are not in the repo yet.
 
@@ -124,7 +124,7 @@ The same options exist on the command line (`quickstart.py`, `tools/`) and in Py
 | `--tiles N` | `FaceBlurrer(tiles=)` | `1` (off) | Also detect on an N x N grid of overlapping tiles, so small faces are seen larger | 1 + N×N detector runs per frame. Helps `face_det_lite`; YOLO rarely needs it |
 | `--min-size PX` | `FaceBlurrer(min_size=)` | `0` (`24` for yunet) | Skip faces smaller than PX pixels | Fewer false small faces, misses distant ones |
 | `--low-score S` | `fb.stream(low_score=)` | `0.3` | ByteTrack second stage: detections between this and the threshold keep a known face tracked | `0` turns it off |
-| `--device auto\|cpu\|gpu\|npu` | `FaceBlurrer(device=)` | `auto` | Where the detector runs. `auto`: the Qualcomm NPU, else an NVIDIA GPU (needs `pip install onnxruntime-gpu[cuda,cudnn]`), else the CPU. `cpu`, `gpu`, `npu`: that one only; a missing device is an error, not a silent CPU fallback | |
+| `--device cpu\|gpu\|npu` | `FaceBlurrer(device=)` | `cpu` | Where the detector runs: `cpu`; `gpu`, an NVIDIA GPU (needs `pip install onnxruntime-gpu[cuda,cudnn]`); `npu`, a Qualcomm NPU (needs `onnxruntime-qnn`). Nothing is picked for you; a device that is missing is an error, not a silent CPU fallback | |
 | | `fb.stream(max_state_mb=)`, `live.reset()` | `100` | For streams that run for days: `live.reset()` forgets every tracked face (the next frame is analysed from scratch, buffered frames keep their boxes); the stream also resets itself if its tracking state passes `max_state_mb`. `live.state_mb` and `live.resets` show both | Normal tracking state is under 1 MB, so the limit is a safety net. The frames held for `--delay` are not counted: watch `live.buffered` |
 
 ### Blur (mask) and display
