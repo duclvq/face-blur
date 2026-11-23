@@ -31,9 +31,9 @@ live = fb.stream(                   # live video: detector + tracker between fra
     # detect_every=3,               # uncomment for lower latency (2 or 3): detector on every 2nd or
                                     #   3rd frame only, faces moved by tracking in between (2 to 3x less
                                     #   work per frame). Default 1 = detector on every frame (most accurate)
-    # delay=0.5,                    # uncomment for more accuracy: push() returns the frame from 0.5 s ago,
-                                    #   fixed with what was seen since (faces found late are blurred back
-                                    #   in time): ~half the misses. Default 0 = no delay
+    # delay=0.5,                    # uncomment for more accuracy: hold each frame 0.5 s (timed on when
+                                    #   frames arrive) so faces the detector finds late are blurred in the
+                                    #   earlier frames too; about half the misses. Default 0 = no delay
 )
 
 for frame in frames:                # BGR numpy arrays (H x W x 3, uint8)
