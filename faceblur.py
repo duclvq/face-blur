@@ -22,7 +22,7 @@ The detector is chosen per process (detector keeps it in module state), so
 use one model per process. Images are BGR numpy arrays, as from cv2.imread or
 cv2.VideoCapture.
 """
-import math
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -118,9 +118,9 @@ class FaceBlurrer:
 
     # ---------------------------------------------------------------- live
 
-    def stream(self, fps, low_score=0.1, delay=0, max_buffered=None):
+    def stream(self, fps, low_score=0.1, delay=0):
         """A StreamBlurrer for live frames; see that class."""
-        return StreamBlurrer(self, fps, low_score, delay, max_buffered)
+        return StreamBlurrer(self, fps, low_score, delay)
 
 
 class StreamBlurrer:
@@ -154,23 +154,26 @@ class StreamBlurrer:
     push(frame) = put(frame) then get(): with delay=0 it returns this frame's
     result at once; with a delay, None until `delay` frames are buffered.
 
-    Memory: the stream holds at most max_buffered frames (default: delay plus
-    one second of frames). When the output side falls behind and the buffer
-    is full, put() drops the oldest frame; live.dropped counts them, and a
-    dropped frame is never returned. Tracking keeps only the faces found in
-    the last second, and the delay buffer only the faces in its held frames.
-    To start again with no tracked faces, make a new stream with fb.stream().
+    Memory: the stream holds only what it needs, delay + 1 frames. When that
+    many are held, put() waits until get(), called from another thread, takes
+    one; no frame is dropped. Called again from a thread that has not called
+    get() since its last put(), it raises RuntimeError instead of waiting
+    forever. Tracking keeps only the faces found in the last second, and the
+    delay buffer only the faces in its held frames. To start again with no
+    tracked faces, make a new stream with fb.stream().
     """
 
-    def __init__(self, blurrer, fps, low_score=0.1, delay=0, max_buffered=None):
+    def __init__(self, blurrer, fps, low_score=0.1, delay=0):
         from tracker import Analyzer, Lookahead  # imported here: only needed for streams
-        if fps <= 0 or (max_buffered is not None and max_buffered < 1):
-            raise ValueError("need fps > 0, max_buffered >= 1")
+        if fps <= 0:
+            raise ValueError("need fps > 0")
         self.fb = blurrer
-        self.fps, self.max_buffered, self.dropped = fps, max_buffered, 0
         opts = SimpleNamespace(min_size=blurrer.min_size, low_score=low_score)
         self.analyzer = Analyzer(opts, fps)
         self.buffer = Lookahead(self.analyzer)
+        self._space = threading.Condition()
+        self._getters = set()       # threads that have called get()
+        self._got = True            # get() called since the last put()
         self.delay = delay
 
     @property
@@ -183,6 +186,8 @@ class StreamBlurrer:
         if frames < 0 or int(frames) != frames:
             raise ValueError("delay is a whole number of frames >= 0")
         self._delay = int(frames)
+        with self._space:  # a longer delay makes room for a waiting put()
+            self._space.notify_all()
 
     @property
     def buffered(self):
@@ -191,10 +196,8 @@ class StreamBlurrer:
 
     @property
     def capacity(self):
-        """Most frames held: max_buffered, or delay plus one second of frames
-        (never fewer than delay + 1, so get() can still return frames)."""
-        cap = self.max_buffered if self.max_buffered is not None else self._delay + math.ceil(self.fps)
-        return max(cap, self._delay + 1)
+        """Most frames held: delay + 1."""
+        return self._delay + 1
 
     @property
     def ready(self):
@@ -202,19 +205,31 @@ class StreamBlurrer:
         return max(0, len(self.buffer) - self._delay)
 
     def put(self, frame):
-        """Analyse a frame and add it to the buffer; if the buffer is then
-        over capacity, drop the oldest frames (counted in live.dropped)."""
+        """Analyse a frame and add it to the buffer. With delay + 1 frames
+        held, wait until another thread's get() takes one (see the class)."""
+        me = threading.get_ident()
+        with self._space:
+            while len(self.buffer) >= self.capacity:
+                if self._getters - {me}:
+                    self._space.wait()
+                elif self._got:
+                    break  # this thread took all it could; the rest is from a shorter delay
+                else:
+                    raise RuntimeError(f"stream buffer full ({self.capacity} frames = delay + 1): "
+                                       "call get() before the next put(), or get() from another thread")
+            self._got = False
         self.buffer.put(frame)
-        while len(self.buffer) > self.capacity:
-            if self.buffer.pop() is not None:
-                self.dropped += 1
 
     def get(self, force=False):
         """The oldest buffered frame as a FrameResult, if `delay` newer frames
         are behind it (or force=True and any frame is held); else None."""
+        self._getters.add(threading.get_ident())
+        self._got = True
         if not force and len(self.buffer) <= self._delay:
             return None
         e = self.buffer.pop()
+        with self._space:
+            self._space.notify_all()
         return self._result(*e) if e else None
 
     def push(self, frame):
@@ -224,7 +239,10 @@ class StreamBlurrer:
 
     def flush(self):
         """All the frames still held, as FrameResults (end of the stream)."""
-        return [self._result(*e) for e in self.buffer.flush()]
+        out = [self._result(*e) for e in self.buffer.flush()]
+        with self._space:
+            self._space.notify_all()
+        return out
 
     def _result(self, frame, faces):
         return FrameResult(frame, faces or [], faces is None, self.fb)

@@ -192,25 +192,59 @@ def test_frame_time_after_a_week_without_scene_cut(scripted):
     assert aged < fresh + 2.0, f"a week-old stream costs {aged - fresh:.1f} ms more per frame"
 
 
-def test_buffer_bounded_when_output_stalls(scripted):
-    """The output side stops for 1000 frames. The stream never holds more than
-    its capacity (delay + one second); the oldest frames are dropped and
-    counted, and the frames it returns afterwards are the newest, in order."""
+def test_buffer_holds_delay_plus_one_when_output_stalls(scripted):
+    """Input and output in two threads; the output stops for 1 s twice. The
+    stream never holds more than delay + 1 frames (put() waits), and every
+    frame comes out once, in order."""
     crowd = scripted(W=320, H=180)
-    delay = 12
+    delay, n = 12, 600
     live = FaceBlurrer(mask=False).stream(fps=FPS, delay=delay)
-    tag, held = {}, 0
-    for k in range(1000):
-        f = crowd.next()
-        tag[id(f)] = k
-        live.put(f)
-        held = max(held, live.buffered)
-    assert held == live.capacity == delay + FPS
-    assert live.dropped == 1000 - live.capacity
-    order = [tag[id(r.original)] for r in live.flush()]
-    assert order == list(range(1000 - live.capacity, 1000))
-    with pytest.raises(ValueError):
-        FaceBlurrer(mask=False).stream(fps=FPS, max_buffered=0)
+    tag, order, held, errors = {}, [], [0], []
+    done = threading.Event()
+
+    def producer():
+        try:
+            for k in range(n):
+                f = crowd.next()
+                tag[id(f)] = k
+                live.put(f)
+                held[0] = max(held[0], live.buffered)
+        except Exception as e:
+            errors.append(e)
+        finally:
+            done.set()
+
+    th = threading.Thread(target=producer, daemon=True)
+    th.start()
+    while not (done.is_set() and live.buffered == 0):
+        if len(order) in (100, 400):
+            time.sleep(1.0)  # the output side stalls
+        r = live.get(force=done.is_set())
+        if r is None:
+            time.sleep(0.001)
+            continue
+        order.append(tag.pop(id(r.original)))
+    th.join(timeout=10)
+    assert not errors, errors
+    assert held[0] <= delay + 1, f"held {held[0]} frames, more than delay + 1"
+    assert order == list(range(n)), "frames lost, repeated or reordered"
+
+
+def test_put_twice_without_get_raises(scripted):
+    """One thread calling put() again without get() would wait forever: it
+    raises instead. A shorter delay set while running is not an error."""
+    crowd = scripted(W=320, H=180)
+    live = FaceBlurrer(mask=False).stream(fps=FPS, delay=0)
+    live.put(crowd.next())
+    with pytest.raises(RuntimeError):
+        live.put(crowd.next())
+    live = FaceBlurrer(mask=False).stream(fps=FPS, delay=10)
+    for _ in range(11):
+        live.put(crowd.next())
+        live.get()
+    live.delay = 0  # 10 frames held, capacity now 1
+    live.put(crowd.next())
+    assert sum(1 for _ in iter(live.get, None)) == 11
 
 
 def test_tracking_keeps_only_what_it_needs(scripted):
