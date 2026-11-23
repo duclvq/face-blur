@@ -29,6 +29,18 @@ Or run this file:
 INPUT is a video file, a URI (rtsp://, http://, file:///...), or a webcam
 index (0). A file plays at its own speed with --show (like a live source) and
 as fast as possible without it.
+
+Setup (GStreamer + Python bindings from conda-forge, in their own env):
+
+    conda create -n faceblur-gst -c conda-forge python=3.12 pygobject gstreamer \\
+        gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav \\
+        gst-python numpy opencv onnxruntime scipy scikit-image onnx pyyaml tqdm requests
+    conda run -n faceblur-gst pip install --no-deps insightface==2.1
+    conda run -n faceblur-gst pip install onnxruntime-gpu      # NVIDIA GPU only
+    conda run -n faceblur-gst --no-capture-output python gst_faceblur.py VIDEO --show
+
+On Windows, run through `conda run` (or an activated env): otherwise the
+GStreamer DLLs are not found.
 """
 import argparse
 import sys
