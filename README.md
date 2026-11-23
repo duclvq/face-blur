@@ -25,10 +25,15 @@ fb = FaceBlurrer(                   # load the model once, then reuse it; defaul
     # shape="oval",                 # or "rect" (whole box)
     # pad=0.15,                     # margin around each face
 )
-live = fb.stream(
-    fps=25,                         # frame rate of the source
-    # detect_every=1,               # run the detector every N frames, track in between
-    # delay=0,                      # e.g. 0.5: output 0.5 s later, about half the misses
+live = fb.stream(                   # live video: detector + tracker between frames
+    fps=25,                         # frame rate of your source (needed to turn seconds into frames)
+    # detect_every=3,               # uncomment for lower latency (2 or 3): detector on every 2nd or
+                                    #   3rd frame only, faces moved by tracking in between (2 to 3x less
+                                    #   work per frame). Default 1 = detector on every frame (most accurate)
+    # delay=0.5,                    # uncomment for more accuracy: push() returns the frame from 0.5 s ago,
+                                    #   fixed with what was seen since (faces found late are blurred back
+                                    #   in time): ~half the misses. Default 0 = this frame at once
+    # hold=0.3,                     # seconds a face stays blurred after the detector loses it
 )
 
 for frame in frames:                # BGR numpy arrays (H x W x 3, uint8)
