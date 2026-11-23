@@ -3,8 +3,8 @@
 Analyzer(opts, fps).push(frame) returns the faces of that frame as
 (x, y, w, h, score, track_id), or None if analysing it failed (then blur the
 whole frame). score is the detector confidence at the face's last detection.
-Lookahead(analyzer, frames) adds an optional delay that uses the frames
-after a detection to fix the frames before it.
+Lookahead(analyzer, delay) adds an optional delay (seconds, measured on frame
+timestamps) that uses the frames after a detection to fix the frames before it.
 faceblur.StreamBlurrer wraps it; tools/blur_live.py is a preview CLI.
 
 How it works:
@@ -250,7 +250,7 @@ class Analyzer:
 # --------------------------------------------------------------------------- optional delay
 
 class Lookahead:
-    """Hold frames for `frames` frames, so what is found later fixes them:
+    """Hold frames for `delay` seconds, so what is found later fixes them:
 
       * a face seen for the first time is followed back with optical flow
         through the held frames (the detector missed its first frames, or it
@@ -258,17 +258,22 @@ class Lookahead:
       * a face found again after it was lost (same ByteTrack id) is filled in
         the frames between, by interpolating its box.
 
-    push(frame) returns the (frame, faces) pairs that leave the buffer, oldest
-    first (none while it fills, then one per frame); flush() the rest.
+    The delay is measured on the frames' own timestamps (push(frame, t)), so
+    it stays `delay` seconds when the frame rate changes or frames are
+    dropped, and `delay` can be changed while running.
+
+    push(frame, t) returns the (frame, faces) pairs that leave the buffer,
+    oldest first: those `delay` seconds or more older than `t` (none while it
+    fills); flush() the rest.
     """
 
-    def __init__(self, analyzer, frames):
-        self.an, self.n = analyzer, max(1, int(frames))
-        self.buf = deque()       # [i, frame, gray, faces or None]
+    def __init__(self, analyzer, delay):
+        self.an, self.delay = analyzer, delay
+        self.buf = deque()       # [i, frame, gray, faces or None, t]
         self.seen = {}           # track id -> (frame index, box) where last present
         self.i = 0
 
-    def push(self, frame):
+    def push(self, frame, t):
         i = self.i
         self.i += 1
         faces = self.an.push(frame)
@@ -283,12 +288,13 @@ class Lookahead:
                 elif i - last[0] > 1:
                     self._gap(f, last, i, box)
                 self.seen[tid] = (i, box)
-        if i % 100 == 0:  # forget faces not seen within the buffer
-            self.seen = {k: v for k, v in self.seen.items() if i - v[0] <= self.n + 1}
-        self.buf.append([i, frame, gray, faces])
+        self.buf.append([i, frame, gray, faces, t])
         out = []
-        while len(self.buf) > self.n:
+        while self.buf and t - self.buf[0][4] >= self.delay - 1e-6:
             out.append(self._emit(self.buf.popleft()))
+        if i % 100 == 0:  # forget faces last seen before the buffer
+            first = self.buf[0][0] if self.buf else i
+            self.seen = {k: v for k, v in self.seen.items() if v[0] >= first - 1}
         return out
 
     def flush(self):

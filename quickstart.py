@@ -13,7 +13,7 @@ only shows the analysis step.
     python quickstart.py --input video.mp4 --tiles 2                                 # small faces too
     python quickstart.py --input video.mp4 --tiles 2 --detect-every 3                # detect every 3rd frame
     python quickstart.py --input video.mp4 --threshold 0.6                           # fewer false faces
-    python quickstart.py --input video.mp4 --delay 12                                # 12 frames later (0.5 s at 25 fps), about half the misses
+    python quickstart.py --input video.mp4 --delay 0.5                               # 0.5 s later, about half the misses
     python quickstart.py --input video.mp4 --method pixelate --shape rect            # pixel blocks over the whole box
     python quickstart.py --input rtsp://camera/stream --output rtsp://server/blurred # re-stream
     python quickstart.py                                                             # the sample clip
@@ -37,10 +37,10 @@ def main():
     ap.add_argument("--detect-every", type=int, default=1, metavar="N",
                     help="run the detector every N frames; tracking (ByteTrack + optical flow) "
                          "moves the faces in between (default 1 = every frame)")
-    ap.add_argument("--delay", type=int, default=0, metavar="FRAMES",
-                    help="hold the output FRAMES frames so later detections fix earlier frames: "
-                         "e.g. 12 (0.5 s at 25 fps): about half as many faces left unblurred "
-                         "(default 0 = no delay)")
+    ap.add_argument("--delay", type=float, default=0, metavar="SEC",
+                    help="hold the output SEC seconds so later detections fix earlier frames: "
+                         "e.g. 0.5: about half as many faces left unblurred (default 0 = no delay). "
+                         "Measured on the frames' capture times, so it holds when the fps changes")
     ap.add_argument("--threshold", type=float, default=None, metavar="T",
                     help="confidence a detection needs to count as a face, 0..1 (default: the "
                          "model's own, yolo11n 0.3, face_det_lite 0.55, yunet 0.7). Lower finds more faces "
@@ -93,7 +93,7 @@ def main():
 
     for frame in video:
         t = stats.start()
-        res = live.push(frame)                        # analyse one frame
+        res = live.push(frame, t=video.t)             # analyse one frame (t: its capture time)
         if res is None:                               # --delay: the buffer is still filling
             continue
         if not show(res, t):

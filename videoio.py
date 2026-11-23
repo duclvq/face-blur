@@ -110,6 +110,7 @@ class VideoSource:
 
     size, fps -- frame size (after `width` scaling) and frame rate
     dropped   -- frames dropped so far
+    t         -- capture time (time.time()) of the frame just returned
     """
 
     def __init__(self, src, width=0, sw=False):
@@ -119,6 +120,7 @@ class VideoSource:
         self.src, self.size, self.fps, self.codec, self.sw = src, (w, h), fps, codec, sw
         self.q = queue.Queue(maxsize=2)
         self.dropped = 0
+        self.t = None  # capture time of the last frame returned
         self.stop = threading.Event()
         threading.Thread(target=self._run, daemon=True).start()
 
@@ -180,6 +182,7 @@ class VideoSource:
     def __iter__(self):
         try:
             while (item := self.q.get()) is not None:
+                self.t = item[1]  # capture time of this frame (time.time())
                 yield item[0]
         finally:
             self.close()
