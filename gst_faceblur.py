@@ -3,7 +3,8 @@
 
     faceblurdelay  (video/x-raw, format=BGR in and out)
       delay         output delay in seconds (default 0.5)
-      model         raccoon_s (default), raccoon_l or yunet
+      model         raccoon_s (default; face_det_lite on Qualcomm hardware),
+                    raccoon_l, yunet or face_det_lite
       detect-every  run the face detector every N frames (default 1: every frame)
       extend        also blur before the first / after the last detection
                     of a face (default false: frame-accurate, gaps between
@@ -57,7 +58,7 @@ from gi.repository import GLib, GObject, Gst, GstVideo  # noqa: E402
 import numpy as np  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from faceblur import FaceBlurrer  # noqa: E402
+from faceblur import DEFAULT_MODEL, MODELS, FaceBlurrer  # noqa: E402
 
 Gst.init(None)  # needed before any caps or templates are made; safe to call again
 BGR = Gst.Caps.from_string("video/x-raw,format=BGR")
@@ -74,7 +75,7 @@ class FaceBlurDelay(Gst.Element):
     __gproperties__ = {
         "delay": (float, "Delay", "Output delay in seconds", 0.0, 10.0, 0.5,
                   GObject.ParamFlags.READWRITE),
-        "model": (str, "Model", "raccoon_s, raccoon_l or yunet", "raccoon_s",
+        "model": (str, "Model", "raccoon_s, raccoon_l, yunet or face_det_lite", DEFAULT_MODEL,
                   GObject.ParamFlags.READWRITE),
         "detect-every": (int, "Detect every", "Run the detector every N frames", 1, 1000, 1,
                          GObject.ParamFlags.READWRITE),
@@ -84,7 +85,7 @@ class FaceBlurDelay(Gst.Element):
 
     def __init__(self):
         super().__init__()
-        self.props_ = {"delay": 0.5, "model": "raccoon_s", "detect-every": 1, "extend": False}
+        self.props_ = {"delay": 0.5, "model": DEFAULT_MODEL, "detect-every": 1, "extend": False}
         self.sinkpad = Gst.Pad.new_from_template(self.get_pad_template("sink"), "sink")
         self.srcpad = Gst.Pad.new_from_template(self.get_pad_template("src"), "src")
         self.sinkpad.set_chain_function_full(self._chain)
@@ -226,7 +227,7 @@ def main():
     ap.add_argument("output", nargs="?", help="output .mp4 file")
     ap.add_argument("--show", action="store_true", help="show the blurred video (file plays in real time)")
     ap.add_argument("--delay", type=float, default=0.5, help="output delay in seconds")
-    ap.add_argument("--model", default="raccoon_s", choices=["raccoon_s", "raccoon_l", "yunet"])
+    ap.add_argument("--model", default=DEFAULT_MODEL, choices=MODELS)
     ap.add_argument("--detect-every", type=int, default=1)
     a = ap.parse_args()
     if not a.output and not a.show:

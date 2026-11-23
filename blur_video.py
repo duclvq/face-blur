@@ -33,7 +33,8 @@ from pathlib import Path
 
 import cv2
 
-from blur_faces import (COVERAGE_WARN, DEFAULT_MODEL, MODELS, YUNET_MODEL, blur_region,
+from blur_faces import (COVERAGE_WARN, DEFAULT_MODEL, MODELS, RACCOON_MODELS, YUNET_MODEL,
+                        blur_region, use_model,
                         blurred_fraction, detect_faces, gpu_message, use_gpu)
 
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
@@ -515,7 +516,7 @@ def process_video(src, dst, opts, use_ffmpeg, label):
 
     t_start = time.time()
     known_boxes = None
-    if opts.model != "yunet":
+    if opts.model in RACCOON_MODELS:
         try:
             meta, known_boxes = analyze_privateframe(src, opts)
         except (Exception, KeyboardInterrupt) as e:
@@ -681,6 +682,8 @@ def main():
         print("Face detector: YuNet (OpenCV)")
         if not args.cpu:
             print(gpu_message(use_gpu()))
+    elif args.model not in RACCOON_MODELS:
+        print(use_model(args.model, args.cpu))
     else:
         dev = "CPU only" if args.cpu else "GPU when available, else CPU"
         print(f"Face detector: {args.model} (InsightFace PrivateFrame: SCRFD + tracking; {dev})")

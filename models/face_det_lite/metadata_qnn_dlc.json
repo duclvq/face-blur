@@ -1,0 +1,73 @@
+{
+  "aihm_version": "0.1.dev1+gbb8501698",
+  "model_id": "face_det_lite",
+  "model_name": "Lightweight-Face-Detection",
+  "runtime": "RUNTIME_QNN_DLC",
+  "precision": "PRECISION_FLOAT",
+  "tool_versions": {
+    "qairt": "2.51.0.260929181845"
+  },
+  "model_files": [
+    {
+      "filename": "face_det_lite.dlc",
+      "inputs": [
+        {
+          "name": "input",
+          "shape": [
+            1,
+            480,
+            640,
+            1
+          ],
+          "dtype": "DTYPE_FLOAT32",
+          "value_range": {
+            "double_r": {
+              "min": 0.0,
+              "max": 1.0
+            }
+          },
+          "io_type": "IO_TYPE_IMAGE",
+          "image_metadata": {
+            "color_format": "COLOR_FORMAT_GRAYSCALE"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "heatmap",
+          "shape": [
+            1,
+            60,
+            80,
+            1
+          ],
+          "dtype": "DTYPE_FLOAT32",
+          "io_type": "IO_TYPE_TENSOR"
+        },
+        {
+          "name": "bbox",
+          "shape": [
+            1,
+            60,
+            80,
+            4
+          ],
+          "dtype": "DTYPE_FLOAT32",
+          "io_type": "IO_TYPE_TENSOR"
+        },
+        {
+          "name": "landmark",
+          "shape": [
+            1,
+            60,
+            80,
+            10
+          ],
+          "dtype": "DTYPE_FLOAT32",
+          "io_type": "IO_TYPE_TENSOR"
+        }
+      ]
+    }
+  ],
+  "use_case": "MODEL_USE_CASE_OBJECT_DETECTION"
+}

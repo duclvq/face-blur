@@ -38,6 +38,7 @@ The first run sets itself up, which takes a few minutes.
 | `raccoon_s` (default) | Best results. Finds small and hard-to-see faces, and in videos follows faces from frame to frame. Slow on a laptop. |
 | `raccoon_l` | Like `raccoon_s`, larger and slower. |
 | `yunet` | Old or low-end machines. Much faster, but misses small faces. |
+| `face_det_lite` | Qualcomm Lightweight-Face-Detection (BSD-3). The default on Qualcomm hardware (runs on the Hexagon NPU); misses small faces. |
 
 The raccoon models come from [InsightFace](https://github.com/deepinsight/insightface) and are for **non-commercial research only**. For commercial use, use `--model yunet` (MIT license).
 
@@ -83,6 +84,8 @@ No face detector is perfect. Check a sample of the output by hand before sharing
 The blur is frame-accurate: faces are detected in every frame, and a face is blurred from its first to its last detection. Output is delayed by `--delay` seconds (default `0.5`) so that a face the detector misses for a few frames stays blurred in between. `--extend` also blurs a face a little before and after it is detected (safer for privacy, but the blur can show before a face appears). On a slow machine, `--detect-every 3` runs the detector less often and follows faces with optical flow in between. If the machine is too slow, frames are dropped, never sent unblurred. No sound.
 
 `raccoon_s` keeps up with live video on an NVIDIA or Apple GPU; on a CPU only, add `--model yunet` (or `--detect-every 6`) to drop fewer frames.
+
+On a Qualcomm Snapdragon device with onnxruntime-qnn, face detection runs on the Hexagon NPU with `face_det_lite` by default (`--npu yunet` for YuNet; not yet tested on hardware). See [docs/hexagon.md](docs/hexagon.md).
 
 ## Use it from your own code
 

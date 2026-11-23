@@ -34,17 +34,19 @@ _yunet = None
 
 
 def detect_faces_yunet(img, min_size=24, score=SCORE_THRESHOLD):
-    """Return a list of (x, y, w, h) face boxes using YuNet."""
+    """Return a list of (x, y, w, h, score) face boxes using YuNet."""
     global _yunet
     h, w = img.shape[:2]
     if _yunet is None:
         _yunet = cv2.FaceDetectorYN.create(str(YUNET_MODEL), "", (w, h), score,
                                            NMS_THRESHOLD, TOP_K)
     _yunet.setInputSize((w, h))
+    _yunet.setScoreThreshold(score)
     _, faces = _yunet.detect(img)
     if faces is None:
         return []
-    return [tuple(int(v) for v in f[:4]) for f in faces if min(f[2], f[3]) >= min_size]
+    return [tuple(int(v) for v in f[:4]) + (float(f[14]),)
+            for f in faces if min(f[2], f[3]) >= min_size]
 
 
 class OrtYuNet:
@@ -69,7 +71,7 @@ class OrtYuNet:
         self.provider = self.sess.get_providers()[0]
         self.names = [o.name for o in self.sess.get_outputs()]
 
-    def detect(self, img, min_size=24):
+    def detect(self, img, min_size=24, thresh=SCORE_THRESHOLD):
         h, w = img.shape[:2]
         a = self.align
         ph, pw = ((h - 1) // a + 1) * a, ((w - 1) // a + 1) * a
@@ -86,7 +88,7 @@ class OrtYuNet:
             cls = np.clip(out[f"cls_{s}"][0, :, 0], 0, 1)
             obj = np.clip(out[f"obj_{s}"][0, :, 0], 0, 1)
             score = np.sqrt(cls * obj)
-            keep = np.nonzero(score >= SCORE_THRESHOLD)[0]
+            keep = np.nonzero(score >= thresh)[0]
             if not keep.size:
                 continue
             bb = out[f"bbox_{s}"][0, keep]
@@ -99,9 +101,10 @@ class OrtYuNet:
             return []
         boxes, scores = np.concatenate(boxes), np.concatenate(scores)
         idx = cv2.dnn.NMSBoxes(boxes.astype(np.int32).tolist(), scores.tolist(),
-                               SCORE_THRESHOLD, NMS_THRESHOLD, top_k=TOP_K)
-        faces = boxes[np.asarray(idx, int).reshape(-1)]
-        return [tuple(int(v) for v in f) for f in faces if min(f[2], f[3]) >= min_size]
+                               thresh, NMS_THRESHOLD, top_k=TOP_K)
+        idx = np.asarray(idx, int).reshape(-1)
+        return [tuple(int(v) for v in f) + (float(sc),) for f, sc in zip(boxes[idx], scores[idx])
+                if min(f[2], f[3]) >= min_size]
 
 
 _ort = None
@@ -147,13 +150,71 @@ def use_gpu(align=32, gpu_after=0):
     return "Face detection on GPU (onnxruntime CUDA)"
 
 
+_npu = None
+
+
+QNN_CACHE = Path.home() / ".cache" / "face-blur" / "qnn"
+
+
+def use_npu(model="face_det_lite", size=None, precision=None, allow_cpu=False,
+            cache_dir=QNN_CACHE, force_cpu=False):
+    """Switch face detection to a Qualcomm Hexagon NPU (onnxruntime QNN EP,
+    HTP backend).
+
+    model: "face_det_lite" (default; Qualcomm Lightweight-Face-Detection,
+    float) or "yunet" (fixed-size quantized YuNet from tools/make_yunet_qnn.py;
+    size (w, h) / precision: see hexagon.SIZES / hexagon.PRECISIONS).
+    allow_cpu: run the same model on the CPU EP when QNN is missing.
+    force_cpu: always run it on the CPU EP.
+    Returns a message naming the provider in use. Falls back to the normal
+    CPU detector with a warning if QNN is unavailable.
+    """
+    global _npu
+    try:
+        import hexagon
+    except ImportError:
+        return "WARNING: --npu needs onnxruntime-qnn (pip install onnxruntime-qnn); using CPU"
+    providers = ["CPUExecutionProvider"] if force_cpu else None
+    if providers is None and not hexagon.qnn_available():
+        if not allow_cpu:
+            return "WARNING: onnxruntime has no QNN support (pip install onnxruntime-qnn); using CPU"
+        providers = ["CPUExecutionProvider"]
+    try:
+        if model == "yunet":
+            det = hexagon.QnnYuNet(size or hexagon.DEFAULT_SIZE, precision or hexagon.DEFAULT_PRECISION,
+                                   providers=providers, cache_dir=cache_dir)
+        else:
+            det = hexagon.QnnFaceDetLite(providers=providers, cache_dir=cache_dir)
+    except Exception as e:  # missing model, QNN backend library that fails to load, ...
+        return f"WARNING: NPU detector could not start ({e}); using CPU"
+    if not det.on_npu and not allow_cpu:
+        return f"WARNING: QNN did not start (providers {det.providers}); using CPU"
+    _npu = det
+    return f"Face detection: {det.name} on {', '.join(det.providers)}"
+
+
 # --------------------------------------------------------------------------- raccoon
 
 # InsightFace "raccoon" model packages (SCRFD-10G detector). Downloaded on first
 # use to ~/.insightface/models. The models are for non-commercial research only.
 RACCOON_MODELS = ("raccoon_s", "raccoon_l")
-MODELS = RACCOON_MODELS + ("yunet",)
-DEFAULT_MODEL = "raccoon_s"
+# face_det_lite: Qualcomm Lightweight-Face-Detection (BSD-3), models/face_det_lite/.
+# It runs on the Hexagon NPU when onnxruntime-qnn is installed, else on the CPU.
+MODELS = RACCOON_MODELS + ("yunet", "face_det_lite")
+
+
+def _default_model():
+    """face_det_lite on Qualcomm hardware (onnxruntime QNN EP present), else raccoon_s."""
+    try:
+        import onnxruntime as ort
+        if "QNNExecutionProvider" in ort.get_available_providers():
+            return "face_det_lite"
+    except ImportError:
+        pass
+    return "raccoon_s"
+
+
+DEFAULT_MODEL = _default_model()
 RACCOON_THRESHOLD = 0.5  # same as InsightFace PrivateFrame
 
 
@@ -193,20 +254,21 @@ class Raccoon:
         self.provider = self.det.session.get_providers()[0]
         self.sizes = None
 
-    def detect(self, img, min_size=0):
+    def detect(self, img, min_size=0, thresh=RACCOON_THRESHOLD):
+        """(x, y, w, h, score) boxes with score >= thresh."""
         big = max(img.shape[:2]) > 800
         sizes = [(640, 640), (1280, 1280)] if big else [(640, 640)]
-        if sizes != self.sizes:
-            self.det.prepare(0, det_thresh=RACCOON_THRESHOLD, input_size=sizes)
-            self.sizes = sizes
+        if (sizes, thresh) != self.sizes:
+            self.det.prepare(0, det_thresh=thresh, input_size=sizes)
+            self.sizes = (sizes, thresh)
         dets, _ = self.det.detect(img)
         H, W = img.shape[:2]
         faces = []
-        for x0, y0, x1, y1, _score in dets:
+        for x0, y0, x1, y1, score in dets:
             x0, y0 = max(int(x0), 0), max(int(y0), 0)
             x1, y1 = min(int(round(x1)), W), min(int(round(y1)), H)
             if x1 - x0 > 0 and y1 - y0 > 0 and min(x1 - x0, y1 - y0) >= min_size:
-                faces.append((x0, y0, x1 - x0, y1 - y0))
+                faces.append((x0, y0, x1 - x0, y1 - y0, float(score)))
         return faces
 
 
@@ -215,10 +277,15 @@ _raccoon = None
 
 def use_model(name, cpu=False):
     """Select the face detector. Returns a message describing it."""
-    global _raccoon
+    global _raccoon, _npu
+    _raccoon = _npu = None
     if name == "yunet":
-        _raccoon = None
         return "Face detector: YuNet (OpenCV)"
+    if name == "face_det_lite":
+        msg = use_npu("face_det_lite", allow_cpu=True, force_cpu=cpu)
+        if msg.startswith("WARNING"):
+            sys.exit(msg)
+        return msg.replace("Face detection:", "Face detector:")
     _raccoon = Raccoon(name, cpu)
     return f"Face detector: {name} (InsightFace SCRFD, {_raccoon.provider})"
 
@@ -230,19 +297,38 @@ def gpu_message(msg):
     return msg
 
 
-def detect_faces(img, min_size=24):
-    """Return a list of (x, y, w, h) face boxes."""
+def face_threshold():
+    """Score above which the current detector reports a face."""
     if _raccoon is not None:
-        return _raccoon.detect(img, min_size)
+        return RACCOON_THRESHOLD
+    if _npu is not None:
+        return _npu.threshold
+    return SCORE_THRESHOLD
+
+
+def detect_faces_scored(img, min_size=24, thresh=None):
+    """Return a list of (x, y, w, h, score) face boxes with score >= thresh
+    (default: the detector's normal threshold, see face_threshold)."""
+    if thresh is None:
+        thresh = face_threshold()
+    if _raccoon is not None:
+        return _raccoon.detect(img, min_size, thresh)
+    if _npu is not None:
+        return _npu.detect(img, min_size, thresh)
     if _ort is not None:
         a = _ort.align
         key = (-(-img.shape[0] // a), -(-img.shape[1] // a))
         _size_counts[key] = _size_counts.get(key, 0) + 1
         if _size_counts[key] > _gpu_after:
             gpu_stats["gpu"] += 1
-            return _ort.detect(img, min_size)
+            return _ort.detect(img, min_size, thresh)
         gpu_stats["cpu"] += 1
-    return detect_faces_yunet(img, min_size)
+    return detect_faces_yunet(img, min_size, thresh)
+
+
+def detect_faces(img, min_size=24):
+    """Return a list of (x, y, w, h) face boxes."""
+    return [f[:4] for f in detect_faces_scored(img, min_size)]
 
 
 def blur_region(img, box, method="gaussian", strength=3, pad=0.15, shape="oval"):

@@ -17,6 +17,11 @@ to a live, causal setting with a short, fixed output delay:
     around each face (with a forward-backward check), fed into a
     constant-velocity alpha-beta filter (a steady-state Kalman filter), so a
     face stays covered while the detector is not run or misses it.
+  * Two-stage association (as in ByteTrack): detections above the normal
+    threshold are matched to tracks first; the tracks left over are then
+    matched to low-score detections (--low-score .. normal threshold) by
+    overlap, so a face that turns, blurs or is half hidden keeps its track.
+    Low-score detections never start a new track.
   * Local re-detection: a tracked face the detector missed is searched for
     again in an upscaled crop around where it should be (helps small faces).
   * Delay: frames wait --delay seconds before output, so the frames between
@@ -27,6 +32,8 @@ to a live, causal setting with a short, fixed output delay:
     back through the delayed frames) and up to --hold after its last one:
     safer for privacy, but the blur can show before a face or stay after it.
   * Scene cuts reset tracking, so a box never jumps across a cut.
+  * The detector runs in its own thread, up to --detect-every frames ahead of
+    tracking, so the two overlap (--serial turns this off).
   * Fail closed: if analysing a frame fails, that frame is blurred whole.
   * Live sources: when the machine is slower than the stream, input frames are
     dropped (never sent out unprocessed), and a lost stream is reconnected.
@@ -43,13 +50,14 @@ import sys
 import threading
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-from blur_faces import (DEFAULT_MODEL, MODELS, SCORE_THRESHOLD, YUNET_MODEL, blur_region,
-                        detect_faces, gpu_message, use_gpu, use_model)
+from blur_faces import (DEFAULT_MODEL, MODELS, YUNET_MODEL, blur_region, detect_faces_scored,
+                        face_threshold, gpu_message, use_gpu, use_model, use_npu)
 
 
 # --------------------------------------------------------------------------- geometry
@@ -186,9 +194,20 @@ class Track:
         self.v = self.v + beta * r
 
 
-def associate(tracks, dets):
-    """Greedy matching by same_face score. Returns (pairs, unmatched_dets)."""
-    cand = sorted(((same_face(t.box, d), ti, di) for ti, t in enumerate(tracks)
+LOW_MIN_IOU = 0.4  # second (low-score) stage: overlap needed to match a track
+
+
+def associate(tracks, dets, min_iou=None):
+    """Greedy matching by same_face score (or by IoU >= min_iou).
+
+    Returns (pairs, unmatched_dets, unmatched_tracks)."""
+    if min_iou is None:
+        score = same_face
+    else:
+        def score(a, b):
+            o = iou(a, b)
+            return o if o >= min_iou else 0.0
+    cand = sorted(((score(t.box, d), ti, di) for ti, t in enumerate(tracks)
                    for di, d in enumerate(dets)), reverse=True)
     used_t, used_d, pairs = set(), set(), []
     for score, ti, di in cand:
@@ -199,7 +218,8 @@ def associate(tracks, dets):
         used_t.add(ti)
         used_d.add(di)
         pairs.append((tracks[ti], dets[di]))
-    return pairs, [d for i, d in enumerate(dets) if i not in used_d]
+    return (pairs, [d for i, d in enumerate(dets) if i not in used_d],
+            [t for i, t in enumerate(tracks) if i not in used_t])
 
 
 _local = None
@@ -277,36 +297,89 @@ class Analyzer:
         self.cut = SceneCut()
         self.prev_gray = None
         self.extend = getattr(opts, "extend", False)
-        self.stats = dict(detections=0, redetections=0, backfilled=0, refilled=0, cuts=0, failed=0)
+        self.low = getattr(opts, "low_score", 0.1)  # 0 = one-stage association only
+        # The detector runs in a worker thread ahead of tracking, so the two
+        # overlap (OpenCV and onnxruntime release the GIL): a frame costs
+        # max(detector / detect_every, tracking) instead of their sum. The
+        # look-ahead of detect_every frames lets one detector run spread over
+        # the frames up to the next one.
+        self.pool = ThreadPoolExecutor(1) if getattr(opts, "parallel", True) else None
+        self.ahead = min(opts.detect_every, max(1, self.delay)) if self.pool else 0
+        self.pending = deque()    # frames whose detection may still be running
+        self.stats = dict(detections=0, redetections=0, low_matches=0, backfilled=0, refilled=0,
+                          cuts=0, failed=0, frames=0, t_detect=0.0, t_track=0.0, t_wait=0.0)
 
     # -- one new frame
     def push(self, i, frame, t_in):
-        entry = dict(i=i, frame=frame, gray=None, cut=False, fail=False, t_in=t_in)
+        entry = dict(i=i, frame=frame, gray=None, cut=False, fail=False, t_in=t_in, det=None)
         try:
-            self._analyse(entry)
-        except Exception as e:  # fail closed: this frame is blurred whole
-            entry["fail"] = True
-            self.stats["failed"] += 1
-            print(f"\n  WARNING: frame {i} analysis failed ({e}); blurring the whole frame")
-        self.buf.append(entry)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            entry["gray"] = gray
+            entry["cut"] = self.cut(gray)
+            if i % self.o.detect_every == 0 or entry["cut"]:
+                entry["det"] = (self.pool.submit(self._detect, frame) if self.pool
+                                else self._detect(frame))
+        except Exception as e:
+            self._fail(entry, e)
+        self.pending.append(entry)
         out = []
-        while len(self.buf) > self.delay:
+        while len(self.pending) > self.ahead:
+            self._track(self.pending.popleft())
+        # Frames still pending count toward the delay, so the total is unchanged.
+        while self.buf and len(self.buf) + len(self.pending) > self.delay:
             out.append(self._emit(self.buf.popleft()))
         return out
 
     def flush(self):
+        while self.pending:
+            self._track(self.pending.popleft())
         out = []
         while self.buf:
             out.append(self._emit(self.buf.popleft()))
         return out
 
+    def _detect(self, frame):
+        t = time.perf_counter()
+        found = detect_faces_scored(frame, self.o.min_size, self._low_threshold())
+        self.stats["t_detect"] += time.perf_counter() - t
+        return found
+
+    def _low_threshold(self):
+        hi = face_threshold()
+        return self.low if 0 < self.low < hi else hi
+
+    def _fail(self, entry, e):  # fail closed: this frame is blurred whole
+        if not entry["fail"]:
+            entry["fail"] = True
+            self.stats["failed"] += 1
+            print(f"\n  WARNING: frame {entry['i']} analysis failed ({e}); blurring the whole frame")
+
+    def _track(self, entry):
+        t0 = time.perf_counter()
+        wait = 0.0
+        if not entry["fail"]:
+            try:
+                det = entry["det"]
+                if hasattr(det, "result"):  # a future: wait for the worker
+                    tw = time.perf_counter()
+                    det = entry["det"] = det.result()
+                    wait = time.perf_counter() - tw
+                self._analyse(entry)
+            except Exception as e:
+                self._fail(entry, e)
+        entry["det"] = None
+        self.buf.append(entry)
+        st = self.stats
+        st["frames"] += 1
+        st["t_wait"] += wait
+        st["t_track"] += time.perf_counter() - t0 - wait
+
     def _analyse(self, e):
         o, i, frame = self.o, e["i"], e["frame"]
         H, W = frame.shape[:2]
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        e["gray"] = self.cur_gray = gray
-        if self.cut(gray):
-            e["cut"] = True
+        gray = e["gray"]
+        self.cur_gray = gray
+        if e["cut"]:
             self.stats["cuts"] += 1
             self.retired += self.tracks
             self.tracks = []  # never carry a box across a cut
@@ -320,11 +393,19 @@ class Analyzer:
                     t.correct(fb, alpha=0.7)
 
         # 2. Detector anchors every N frames, after a cut, and while a face is lost.
-        if i % o.detect_every == 0 or e["cut"]:
-            dets = [np.array([x, y, x + w, y + h], float)
-                    for x, y, w, h in detect_faces(frame, o.min_size)]
+        if e["det"] is not None:
+            hi_th = face_threshold()
+            found = e["det"]
+            high = [np.array([x, y, x + w, y + h], float) for x, y, w, h, sc in found if sc >= hi_th]
+            low = [np.array([x, y, x + w, y + h], float) for x, y, w, h, sc in found if sc < hi_th]
             self.stats["detections"] += 1
-            pairs, new = associate(self.tracks, dets)
+            # ByteTrack: high-score detections first, then the tracks left over
+            # against low-score ones (overlap only; they never start a track).
+            pairs, new, rest = associate(self.tracks, high)
+            if low and rest:
+                low_pairs = associate(rest, low, LOW_MIN_IOU)[0]
+                self.stats["low_matches"] += len(low_pairs)
+                pairs += low_pairs
             matched = set()
             for t, d in pairs:
                 self._confirm(t, d, i)
@@ -575,6 +656,13 @@ def main():
                          "and up to --hold after its last one; safer for privacy, but the blur "
                          "can show before a face appears or stay after it leaves. Default: blur "
                          "only from the first to the last detection, filling the gaps between")
+    ap.add_argument("--low-score", type=float, default=0.1, metavar="S",
+                    help="ByteTrack-style second stage: detections scoring S up to the normal "
+                         "threshold keep an existing face tracked (never start a new one). "
+                         "0 turns it off")
+    ap.add_argument("--serial", dest="parallel", action="store_false",
+                    help="run the detector and tracking one after the other (default: in "
+                         "parallel, the detector one frame ahead)")
     ap.add_argument("--smooth", type=int, default=2, metavar="K",
                     help="smooth boxes over K frames before and after (needs --delay)")
     ap.add_argument("--fps", type=float, default=None, help="frame rate if the source does not report it")
@@ -585,15 +673,36 @@ def main():
     ap.add_argument("--strength", type=int, choices=[1, 2, 3], default=3)
     ap.add_argument("--model", choices=MODELS, default=DEFAULT_MODEL,
                     help="face detector: raccoon_s (default; accurate, finds small faces, "
-                         "wants a GPU for live video), raccoon_l (larger) or yunet "
-                         "(small and fast, any machine)")
+                         "wants a GPU for live video), raccoon_l (larger), yunet "
+                         "(small and fast, any machine) or face_det_lite (Qualcomm "
+                         "Lightweight-Face-Detection; the default on Qualcomm hardware, "
+                         "runs on the Hexagon NPU)")
     ap.add_argument("--min-size", type=int, default=None,
                     help="smallest face size in px (default: 8 for yunet, no limit otherwise)")
     ap.add_argument("--pad", type=float, default=0.2, help="margin around each face, 0..1")
     ap.add_argument("--shape", choices=["rect", "oval"], default="oval")
     ap.add_argument("--cpu", action="store_true", help="do not use an NVIDIA GPU")
+    ap.add_argument("--npu", nargs="?", const="face_det_lite", metavar="MODEL",
+                    help="face detection on a Qualcomm Hexagon NPU (onnxruntime-qnn): "
+                         "face_det_lite (default; Qualcomm Lightweight-Face-Detection, float) or "
+                         "yunet[:WxH] (quantized YuNet, 640x384, 960x544 (default) or 1280x736). "
+                         "On Qualcomm hardware face_det_lite is already the default --model. "
+                         "See docs/hexagon.md")
+    ap.add_argument("--npu-precision", choices=["a8w8", "a16w8", "fp32"], default="a16w8",
+                    help="--npu yunet only: a16w8 (default), a8w8 (older Hexagon) or fp32 (run as fp16)")
+    ap.add_argument("--npu-allow-cpu", action="store_true", help=argparse.SUPPRESS)  # test w/o QNN
     ap.add_argument("--boxes-json", help=argparse.SUPPRESS)  # per-frame boxes, for evaluation
     o = ap.parse_args()
+    npu_model, npu_size = None, None
+    if o.npu:
+        npu_model, _, size = o.npu.partition(":")
+        if npu_model not in ("face_det_lite", "yunet"):
+            ap.error("--npu takes face_det_lite or yunet[:WxH]")
+        if npu_model == "yunet":
+            npu_size = tuple(int(v) for v in (size or "960x544").lower().split("x"))
+        if o.model != npu_model:
+            print(f"--npu uses {npu_model} (not {o.model})")
+        o.model = npu_model
     if not o.output and not o.show:
         ap.error("give an OUTPUT file/URL, or --show")
     if o.detect_every < 1 or o.delay < 0 or o.hold <= 0 or not 0 <= o.pad <= 1:
@@ -620,7 +729,16 @@ def main():
     H, W = first.shape[:2]
     live = is_live(o.source)
     print(use_model(o.model, o.cpu))
-    if o.model == "yunet" and not o.cpu:
+    npu_msg = None
+    if npu_model == "yunet":
+        npu_msg = use_npu("yunet", npu_size, o.npu_precision, allow_cpu=o.npu_allow_cpu)
+    elif npu_model:  # face_det_lite: use_model loaded it, on the NPU when QNN is there
+        import blur_faces
+        if not blur_faces._npu.on_npu and not o.npu_allow_cpu:
+            npu_msg = "WARNING: onnxruntime has no QNN support (pip install onnxruntime-qnn); using CPU"
+    if npu_msg:
+        print(npu_msg)
+    if o.model == "yunet" and not o.cpu and (not npu_msg or npu_msg.startswith("WARNING")):
         print(gpu_message(use_gpu()))
     print(f"Source: {W}x{H} @ {fps:.3f} fps ({'live' if live else 'realtime file' if o.realtime else 'file'}), "
           f"delay {o.delay:g} s, detector every {o.detect_every} frame(s)")
@@ -673,7 +791,13 @@ def main():
     print(f"\r  done: {n} frames in, {stats['written']} out, {stats['dropped']} dropped, "
           f"{n / max(secs, 1e-9):.1f} fps; latency median {lat[len(lat) // 2]:.2f} s, "
           f"p95 {lat[int(len(lat) * 0.95)]:.2f} s")
-    print(f"  detector runs {s['detections']}, local re-detections {s['redetections']}, "
+    nf = max(s["frames"], 1)
+    print(f"  per frame: detector {s['t_detect'] / nf * 1000:.1f} ms, "
+          f"tracking {s['t_track'] / nf * 1000:.1f} ms, "
+          f"waiting for the detector {s['t_wait'] / nf * 1000:.1f} ms"
+          f"{'' if o.parallel else ' (--serial)'}")
+    print(f"  detector runs {s['detections']}, low-score matches {s['low_matches']}, "
+          f"local re-detections {s['redetections']}, "
           f"look-back boxes {s['backfilled']}, re-filled boxes {s['refilled']}, "
           f"scene cuts {s['cuts']}, failed frames {s['failed']}")
     if dump is not None:
