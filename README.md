@@ -27,7 +27,7 @@ fb = FaceBlurrer(                   # load the model once, then reuse it; defaul
     # mask=False,                   # uncomment to skip blurring: res.blurred is None, mask res.boxes yourself
 )
 live = fb.stream(                   # live video: detector + tracker between frames
-    fps=25,                         # frame rate of your source (needed to turn seconds into frames)
+    fps=25,                         # frame rate of your source (times the frames when push() gets no t)
     # detect_every=3,               # uncomment for lower latency (2 or 3): detector on every 2nd or
                                     #   3rd frame only, faces moved by tracking in between (2 to 3x less
                                     #   work per frame). Default 1 = detector on every frame (most accurate)
