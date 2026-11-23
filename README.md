@@ -49,8 +49,8 @@ live = fb.stream(                   # live video: detector on every frame + trac
 
 for frame in frames:                # BGR numpy arrays (H x W x 3, uint8)
     live.put(frame)                 # input side: analyse the frame, add it to the buffer
-    # live.delay = 25               # the buffer is yours: change the delay any time (live.buffered:
-                                    #   frames held now, live.ready: frames get() can return now)
+    # live.delay = 25               # change the delay any time (live.buffered: frames held now,
+                                    #   live.ready: frames get() can return now)
     while (res := live.get()) is not None:   # output side: each frame with `delay` newer ones behind
         res.original                #   the input frame, unchanged
         res.blurred                 #   a blurred copy (None with mask=False)
@@ -60,12 +60,13 @@ for res in live.flush():            # with a delay, at the end: the frames still
     ...
 ```
 
-`put()` and `get()` can also run in two threads, so the output keeps its own clock (a fixed
-frame rate) whatever the input does: call `live.get()` on each output tick, reuse the last
-result when it returns `None` (input late), and call `live.get(force=True)` to shrink the
-buffer when `live.buffered` grows past what you want. `live.push(frame)` is `put` then `get`.
-`live.reset()` forgets every tracked face, for example after you point the camera elsewhere
-(scene cuts already reset it). A stream can run for days: memory and time per frame stay flat.
+`put()` and `get()` can also run in two threads, so the output keeps a fixed frame rate when
+input frames arrive unevenly. Call `live.get()` on each output tick, reuse the last result
+when it returns `None` (input late), and call `live.get(force=True)` to shrink the buffer
+when `live.buffered` grows too large. `live.push(frame)` is `put` then `get`.
+`live.reset()` forgets every tracked face, for example after the camera is moved to another
+view; a scene cut does the same automatically. Memory and time per frame stayed the same in a
+10-minute real-time run and in a simulated week of a busy camera.
 
 Images (no tracking, no delay):
 
@@ -108,7 +109,7 @@ The same options exist on the command line (`quickstart.py`, `tools/`) and in Py
 > [!IMPORTANT]
 > **The two settings that matter most** (in bold below):
 > - **`--model`**: `yolo11n_640` (default) or `yolo11n_1280` for small faces.
-> - **`--delay FRAMES`**: hold the output this many frames so later frames fix earlier ones (default `0`; about 0.5 s worth, e.g. `12` at 25 fps, leaves about a third fewer faces unblurred). Can be changed any time (`live.delay = n`); `put()` and `get()` are separate, so you decide when frames leave the buffer.
+> - **`--delay FRAMES`**: hold the output this many frames so later frames fix earlier ones (default `0`; about 0.5 s worth, e.g. `12` at 25 fps, leaves about a third fewer faces unblurred). Can be changed any time (`live.delay = n`). `get()` returns a frame once `delay` newer frames are behind it.
 
 | Command line | Python | Default | What it does | Trade-off |
 |---|---|---|---|---|
@@ -117,8 +118,8 @@ The same options exist on the command line (`quickstart.py`, `tools/`) and in Py
 | `--threshold T` | `FaceBlurrer(threshold=)` | model's own: yolo11n 0.3, face_det_lite 0.55, yunet 0.7 | Confidence a detection needs to count as a face (0 to 1) | Lower: more faces found, more false ones |
 | `--min-size PX` | `FaceBlurrer(min_size=)` | `0` (`24` for yunet) | Skip faces smaller than PX pixels | Fewer false small faces, misses distant ones |
 | `--low-score S` | `fb.stream(low_score=)` | `0.3` | ByteTrack second stage: detections between this and the threshold keep a known face tracked | `0` turns it off |
-| `--device cpu\|gpu\|npu` | `FaceBlurrer(device=)` | `cpu` | Where the detector runs: `cpu`; `gpu`, an NVIDIA GPU (needs `pip install onnxruntime-gpu[cuda,cudnn]`); `npu`, a Qualcomm NPU (needs `onnxruntime-qnn`). Nothing is picked for you; a device that is missing is an error, not a silent CPU fallback | |
-| | `fb.stream(max_state_mb=)`, `live.reset()` | `100` | For streams that run for days: `live.reset()` forgets every tracked face (the next frame is analysed from scratch, buffered frames keep their boxes); the stream also resets itself if its tracking state passes `max_state_mb`. `live.state_mb` and `live.resets` show both | Normal tracking state is under 1 MB, so the limit is a safety net. The frames held for `--delay` are not counted: watch `live.buffered` |
+| `--device cpu\|gpu\|npu` | `FaceBlurrer(device=)` | `cpu` | Where the detector runs: `cpu`, `gpu` (NVIDIA, needs `pip install onnxruntime-gpu[cuda,cudnn]`) or `npu` (Qualcomm, needs `onnxruntime-qnn`). `FaceBlurrer` raises an error if the device is missing | |
+| | `fb.stream(max_state_mb=)`, `live.reset()` | `100` | `live.reset()` forgets every tracked face. The next frame is analysed from scratch and buffered frames keep their boxes. The stream also resets itself when its tracking state passes `max_state_mb`. `live.state_mb` gives the state size, `live.resets` the number of resets | Tracking state stayed under 70 KB in the tests, so the automatic reset does not normally run. Frames held for `--delay` do not count toward the limit; `live.buffered` gives their number |
 
 ### Blur (mask) and display
 

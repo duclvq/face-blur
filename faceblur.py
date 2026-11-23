@@ -127,9 +127,9 @@ class StreamBlurrer:
 
     Faces are tracked with ByteTrack (Kalman filter + two-stage matching:
     low-score detections, low_score .. the normal threshold, keep an existing
-    face tracked; 0 = off). The detector runs on every frame. A face the
-    detector loses is not blurred any longer
-    (no hold); with a delay, the frames between are filled if it is found again.
+    face tracked; 0 = off). The detector runs on every frame. A face is
+    blurred in the frames the detector finds it in; with a delay, the frames
+    it was missed in are filled when it is found again.
 
     push(frame) returns a FrameResult: the original frame, the blurred frame
     and the face boxes. The input frame is not changed.
@@ -140,11 +140,11 @@ class StreamBlurrer:
       get()       takes the oldest frame out as a FrameResult, once at least
                   `delay` newer frames are behind it; None until then
 
-    The buffer is yours to control: `delay` (frames, default 0; e.g. 12,
-    about 0.5 s at 25 fps) is how many newer frames a frame waits for, so
-    later detections fix it (a new face is followed back through the frames
-    the detector missed it in; a face found again is filled in between).
-    About 0.5 s worth halves the faces left unblurred. Change `live.delay`
+    `delay` (frames, default 0; e.g. 12, about 0.5 s at 25 fps) is how many
+    newer frames a frame waits for, so later detections fix it (a new face is
+    followed back through the frames the detector missed it in; a face found
+    again is filled in between). 12 frames left about a third fewer faces
+    unblurred on two street clips. Change `live.delay`
     any time; `live.buffered` is the number of frames held, `live.ready` the
     number get() can return now. get(force=True) takes the oldest frame even
     with fewer newer ones behind it (e.g. to shrink the buffer, or when your
@@ -153,12 +153,12 @@ class StreamBlurrer:
     push(frame) = put(frame) then get(): with delay=0 it returns this frame's
     result at once; with a delay, None until `delay` frames are buffered.
 
-    For a stream that runs for days: reset() forgets every tracked face (the
-    next frame is analysed from scratch, as after a scene cut; buffered frames
-    keep their boxes). The stream also resets itself when its tracking state
-    passes max_state_mb (default 100; live.state_mb shows it, live.resets
-    counts both kinds). The frames held for `delay` are not part of that
-    limit: they are yours, see live.buffered.
+    reset() forgets every tracked face. The next frame is analysed from
+    scratch, as after a scene cut, and buffered frames keep their boxes. The
+    stream also resets itself when its tracking state passes max_state_mb
+    (default 100). live.state_mb gives the state size and live.resets counts
+    both kinds of reset. Frames held for `delay` do not count toward
+    max_state_mb; live.buffered gives their number.
     """
 
     def __init__(self, blurrer, fps, low_score=0.3, delay=0, max_state_mb=100):
