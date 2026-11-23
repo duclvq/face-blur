@@ -3,3 +3,5 @@ opencv-python>=4.8
 # models are for non-commercial research only. --model yunet needs only OpenCV.
 insightface[privateframe]>=2.1
 onnxruntime
+# bytetrack/ (vendored ByteTrack, MIT): Hungarian matching and Kalman filter
+scipy
