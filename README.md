@@ -75,8 +75,8 @@ python tools/blur_images.py photos/ photos_blurred/   # a whole folder (same opt
 
 | `--model` | Use it for | Size | Mac M4 CPU | IQ-9075 | QCS8550 | X Elite | RB3 Gen 2 |
 |---|---|---|---|---|---|---|---|
-| `yolo11n_640` (default) | Most scenes, crowds included | 2.7M params, 11 MB | 24 ms | 3.7 ms | 2.9 ms | 3.1 ms | 3.0 ms |
-| `yolo11n_1280` | Small, distant faces | 2.7M params, 11 MB | 67 ms | 14 ms | 12 ms | 12 ms | 475 ms (CPU) |
+| `yolo11n_640` (default) | Most scenes, crowds included | 2.7M params, 11 MB | 24 ms | 3.7 ms | 2.9 ms | 3.1 ms | 3.2 ms |
+| `yolo11n_1280` | Small, distant faces | 2.7M params, 11 MB | 67 ms | 14 ms | 12 ms | 12 ms | 18 ms |
 | `face_det_lite` | Fastest on the NPU; misses small faces | 0.9M params, 3.8 MB | 18 ms | 2.7 ms | 1.9 ms | 2.0 ms | 1.4 ms |
 | `yunet` | Simple scenes with a few large faces | 0.05M params, 0.2 MB | 26 ms | 0.6 to 4.6 ms | 0.5 to 4.2 ms | 0.4 to 4.0 ms | 15 to 170 ms (CPU) |
 
