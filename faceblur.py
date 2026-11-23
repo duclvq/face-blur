@@ -53,10 +53,15 @@ class FaceBlurrer:
     tiles    -- also detect on an N x N grid of overlapping tiles (1 = off):
                 finds smaller faces, costs 1 + N*N detector runs per frame
     gpu      -- use the Qualcomm NPU when there is one (falls back to the CPU)
+    mask     -- True (default): stream results carry a blurred copy.
+                False: no blurring at all; res.blurred is None and you mask
+                the faces yourself from res.boxes (method, strength, pad and
+                shape are then unused). On a failed frame (res.failed) no
+                fallback blur is made either: handle it yourself
     """
 
     def __init__(self, model=DEFAULT_MODEL, method="gaussian", strength=3, pad=0.15,
-                 shape="oval", min_size=None, gpu=True, tiles=1, threshold=None):
+                 shape="oval", min_size=None, gpu=True, tiles=1, threshold=None, mask=True):
         if model not in MODELS:
             raise ValueError(f"model must be one of {MODELS}, not {model!r}")
         if method not in ("gaussian", "pixelate"):
@@ -68,7 +73,7 @@ class FaceBlurrer:
         if shape not in ("oval", "rect"):
             raise ValueError("shape must be 'oval' or 'rect'")
         self.model, self.method, self.strength = model, method, strength
-        self.pad, self.shape, self.gpu = pad, shape, gpu
+        self.pad, self.shape, self.gpu, self.mask = pad, shape, gpu, mask
         self.min_size = (24 if model == "yunet" else 0) if min_size is None else min_size
 
         try:
@@ -173,7 +178,8 @@ class FrameResult:
                 face followed by tracking keeps the score it was found with)
     failed   -- True if analysing the frame failed (then `blurred` is the
                 whole frame pixelated, so nothing is shown unblurred)
-    blurred  -- a blurred copy of the frame (made on first use)
+    blurred  -- a blurred copy of the frame (made on first use);
+                None with FaceBlurrer(mask=False)
     """
 
     def __init__(self, frame, faces, failed, blurrer):
@@ -184,6 +190,8 @@ class FrameResult:
 
     @property
     def blurred(self):
+        if not self._fb.mask:
+            return None
         if self._blurred is None:
             out = self.original.copy()
             if self.failed:  # fail closed

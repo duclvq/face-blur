@@ -24,6 +24,7 @@ fb = FaceBlurrer(                   # load the model once, then reuse it; defaul
     # strength=3,                   # 1 (light) .. 3 (heavy)
     # shape="oval",                 # or "rect" (whole box)
     # pad=0.15,                     # margin around each face
+    # mask=False,                   # uncomment to skip blurring: res.blurred is None, mask res.boxes yourself
 )
 live = fb.stream(                   # live video: detector + tracker between frames
     fps=25,                         # frame rate of your source (needed to turn seconds into frames)
@@ -41,7 +42,7 @@ for frame in frames:                # BGR numpy arrays (H x W x 3, uint8)
     if res is None:                 # only with a delay: buffer still filling
         continue
     res.original                    # the input frame, unchanged
-    res.blurred                     # a blurred copy
+    res.blurred                     # a blurred copy (None with mask=False)
     res.boxes                       # the blurred faces: [(x, y, w, h), ...]
     res.scores                      # the confidence of each face
 for res in live.flush():            # with a delay, at the end: the frames still held
@@ -87,6 +88,7 @@ The same options exist on the command line (`quickstart.py`, `tools/`) and in Py
 
 | Command line | Python | Default | What it does |
 |---|---|---|---|
+| **`--no-mask`** | `FaceBlurrer(mask=False)` | mask on | Do not blur at all: `res.blurred` is `None` and your app masks the faces itself from `res.boxes`. The options below are then unused, and a failed frame (`res.failed`) is not blurred either |
 | `--method gaussian\|pixelate` | `FaceBlurrer(method=)` | `gaussian` | Smooth blur or pixel blocks |
 | `--strength 1..3` | `FaceBlurrer(strength=)` | `3` | 1 = light, 3 = heavy |
 | `--shape oval\|rect` | `FaceBlurrer(shape=)` | `oval` | Blur an oval that follows the face, or the whole box (safer) |

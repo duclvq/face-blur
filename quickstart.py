@@ -55,6 +55,9 @@ def main():
                     help="blur an oval that follows the face, or the whole box (safer) (default oval)")
     ap.add_argument("--pad", type=float, default=0.15, metavar="F",
                     help="margin around each face, as a fraction of its size, 0..1 (default 0.15)")
+    ap.add_argument("--no-mask", action="store_true",
+                    help="do not blur: output the original frames (use with --show-scores to see the "
+                         "boxes); for apps that mask the faces themselves from res.boxes")
     ap.add_argument("--show-scores", action="store_true", help="draw each face box with its confidence")
     ap.add_argument("--tiles", type=int, default=1, metavar="N",
                     help="also detect on an N x N grid of tiles, for small faces (default 1 = off; "
@@ -66,23 +69,25 @@ def main():
 
     fb = FaceBlurrer(model=args.model, tiles=args.tiles, threshold=args.threshold,  # load once, reuse
                      min_size=args.min_size, gpu=not args.cpu,
-                     method=args.method, strength=args.strength, shape=args.shape, pad=args.pad)
+                     method=args.method, strength=args.strength, shape=args.shape, pad=args.pad,
+                     mask=not args.no_mask)
     live = fb.stream(fps=video.fps, detect_every=args.detect_every, delay=args.delay)
 
     stats = Stats()                                   # fps and speed, drawn on the frame
 
     def show(res, t):                                 # one analysed frame -> output; False to stop
         # res.original  the input frame, unchanged
-        # res.blurred   a blurred copy
-        # res.boxes     the blurred faces, [(x, y, w, h), ...]
+        # res.blurred   a blurred copy (None with --no-mask: mask res.boxes yourself)
+        # res.boxes     the faces, [(x, y, w, h), ...]
         # res.scores    the confidence of each face
+        out = res.original.copy() if res.blurred is None else res.blurred
         if args.show_scores:
-            draw_faces(res.blurred, res.boxes, res.scores)
-        stats.draw(res.blurred, t, faces=len(res.boxes), dropped=video.dropped)
+            draw_faces(out, res.boxes, res.scores)
+        stats.draw(out, t, faces=len(res.boxes), dropped=video.dropped)
         if sink:
-            sink.write(res.blurred)
+            sink.write(out)
             return True
-        cv2.imshow("blurred (q to quit)", res.blurred)
+        cv2.imshow("face-blur (q to quit)", out)
         return cv2.waitKey(1) & 0xFF != ord("q")
 
     for frame in video:
