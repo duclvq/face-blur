@@ -2,7 +2,7 @@
 
     from faceblur import FaceBlurrer
 
-    fb = FaceBlurrer()                         # YuNet, gaussian blur
+    fb = FaceBlurrer()                         # raccoon_s, gaussian blur
     out = fb.blur(frame)                       # numpy BGR image -> blurred copy
     fb.blur_file("in.jpg", "out.jpg")          # image file
     fb.blur_video("in.mp4", "out.mp4")         # video file (keeps sound with ffmpeg)
@@ -36,8 +36,9 @@ __all__ = ["FaceBlurrer", "StreamBlurrer", "MODELS"]
 class FaceBlurrer:
     """Detect and blur faces.
 
-    model    -- "yunet" (default, fast, MIT), "raccoon_s" or "raccoon_l"
-                (InsightFace, more accurate, non-commercial research only)
+    model    -- "raccoon_s" (default, accurate, finds small faces), "raccoon_l"
+                (larger) -- InsightFace, non-commercial research only -- or
+                "yunet" (small and fast, MIT license, needs only OpenCV)
     method   -- "gaussian" or "pixelate"
     strength -- 1 (light) .. 3 (heavy)
     pad      -- margin around each face, as a fraction of its size (0..1)
@@ -47,7 +48,7 @@ class FaceBlurrer:
     gpu      -- use an NVIDIA GPU when available (falls back to the CPU)
     """
 
-    def __init__(self, model="yunet", method="gaussian", strength=3, pad=0.15,
+    def __init__(self, model="raccoon_s", method="gaussian", strength=3, pad=0.15,
                  shape="oval", min_size=None, gpu=True):
         if model not in MODELS:
             raise ValueError(f"model must be one of {MODELS}, not {model!r}")
@@ -135,18 +136,20 @@ class FaceBlurrer:
 
     # ---------------------------------------------------------------- live
 
-    def stream(self, fps, delay=0.5, detect_every=3, hold=1.0, smooth=2):
+    def stream(self, fps, delay=0.5, detect_every=1, hold=1.0, smooth=2, extend=False):
         """A StreamBlurrer for live frames; see that class."""
-        return StreamBlurrer(self, fps, delay, detect_every, hold, smooth)
+        return StreamBlurrer(self, fps, delay, detect_every, hold, smooth, extend)
 
 
 class StreamBlurrer:
     """Blur a live sequence of frames (webcam, RTSP, ...) like blur_stream.py.
 
     Faces are tracked with optical flow between detector runs. Frames come out
-    `delay` seconds after they go in, so a face is blurred from its first
-    frame, not only from when it is first detected (delay=0: no wait, but the
-    first frames of a face can be missed). If analysing a frame fails, that
+    `delay` seconds after they go in, so the frames between two detections of
+    a face can be filled from both ends. A face is blurred from its first to
+    its last detection only (frame-accurate); extend=True also blurs it before
+    its first detection (within `delay`) and up to `hold` seconds after its
+    last one, which is safer for privacy. If analysing a frame fails, that
     frame is blurred whole.
 
     push(frame) returns the frames that are ready (often none at first, then
@@ -154,13 +157,15 @@ class StreamBlurrer:
     place and returned.
     """
 
-    def __init__(self, blurrer, fps, delay=0.5, detect_every=3, hold=1.0, smooth=2):
+    def __init__(self, blurrer, fps, delay=0.5, detect_every=1, hold=1.0, smooth=2,
+                 extend=False):
         from blur_stream import Analyzer  # imported here: only needed for streams
         if fps <= 0 or delay < 0 or detect_every < 1 or hold <= 0:
             raise ValueError("need fps > 0, delay >= 0, detect_every >= 1, hold > 0")
         self.fb = blurrer
         opts = SimpleNamespace(delay=delay, hold=hold, detect_every=detect_every,
-                               min_size=blurrer.min_size, smooth=smooth if delay else 0)
+                               min_size=blurrer.min_size, smooth=smooth if delay else 0,
+                               extend=extend)
         self.analyzer = Analyzer(opts, fps)
         self.i = 0
 

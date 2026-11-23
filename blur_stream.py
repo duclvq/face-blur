@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Blur faces in a live video stream with YuNet.
+"""Blur faces in a live video stream.
 
 Usage:
-    python blur_stream.py SOURCE [OUTPUT] [--show] [--delay 0.5] [--detect-every 2] ...
+    python blur_stream.py SOURCE [OUTPUT] [--show] [--model raccoon_s|raccoon_l|yunet]
+                          [--delay 0.5] [--detect-every 3] ...
 
 SOURCE is a webcam index (0), an RTSP/RTMP/HTTP/UDP URL, or a video file.
 OUTPUT is a video file, or a stream URL (rtmp://, rtsp://, srt://, udp://).
@@ -10,18 +11,21 @@ OUTPUT is a video file, or a stream URL (rtmp://, rtsp://, srt://, udp://).
 This adapts the ideas of InsightFace PrivateFrame (which needs the whole video)
 to a live, causal setting with a short, fixed output delay:
 
-  * Detector anchors: YuNet runs every N frames (and after a scene cut).
+  * Detector anchors: the face detector (raccoon_s by default, an InsightFace
+    SCRFD model; or YuNet) runs every N frames (and after a scene cut).
   * Tracking in between: sparse Lucas-Kanade optical flow on a small region
     around each face (with a forward-backward check), fed into a
     constant-velocity alpha-beta filter (a steady-state Kalman filter), so a
     face stays covered while the detector is not run or misses it.
   * Local re-detection: a tracked face the detector missed is searched for
     again in an upscaled crop around where it should be (helps small faces).
-  * Look-back within the delay: frames wait --delay seconds before output.
-    A newly found face is tracked backwards through those frames, so its
-    first appearance is blurred too; the frames between two detections of a
-    face are re-filled from both ends; boxes are smoothed with past and
-    future frames (no lag).
+  * Delay: frames wait --delay seconds before output, so the frames between
+    two detections of a face are filled from both ends and boxes are smoothed
+    with past and future frames (no lag).
+  * Frame-accurate by default: a face is blurred from its first to its last
+    detection only. --extend also blurs it before its first detection (tracked
+    back through the delayed frames) and up to --hold after its last one:
+    safer for privacy, but the blur can show before a face or stay after it.
   * Scene cuts reset tracking, so a box never jumps across a cut.
   * Fail closed: if analysing a frame fails, that frame is blurred whole.
   * Live sources: when the machine is slower than the stream, input frames are
@@ -44,8 +48,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from blur_faces import (SCORE_THRESHOLD, YUNET_MODEL, blur_region, detect_faces,
-                        gpu_message, use_gpu)
+from blur_faces import (DEFAULT_MODEL, MODELS, SCORE_THRESHOLD, YUNET_MODEL, blur_region,
+                        detect_faces, gpu_message, use_gpu, use_model)
 
 
 # --------------------------------------------------------------------------- geometry
@@ -163,6 +167,7 @@ class Track:
         self.id = Track._next
         self.s = to_state(box)
         self.v = np.zeros(4)
+        self.first_seen = frame         # first frame confirmed by the detector
         self.last_seen = frame          # last frame confirmed by the detector
         self.anchors = [(frame, np.array(box, float))]
         self.boxes = {frame: np.array(box, float)}
@@ -271,6 +276,7 @@ class Analyzer:
         self.buf = deque()        # entries: dict(i, frame, gray, cut, fail, t_in)
         self.cut = SceneCut()
         self.prev_gray = None
+        self.extend = getattr(opts, "extend", False)
         self.stats = dict(detections=0, redetections=0, backfilled=0, refilled=0, cuts=0, failed=0)
 
     # -- one new frame
@@ -323,8 +329,10 @@ class Analyzer:
             for t, d in pairs:
                 self._confirm(t, d, i)
                 matched.add(t.id)
-            # Local re-detection for tracked faces the detector missed.
-            budget = 4
+            # Local re-detection for tracked faces the detector missed (only with
+            # extend: its lower threshold also "finds" a face on the back of a
+            # head, which kept the blur on after the face had gone).
+            budget = 4 if self.extend else 0
             for t in self.tracks:
                 # only for a face seen at the previous detector run (a fresh miss)
                 if t.id in matched or budget == 0 or i - t.last_seen > 2 * o.detect_every:
@@ -338,7 +346,8 @@ class Analyzer:
             for d in new:
                 t = Track(d, i)
                 self.tracks.append(t)
-                self._backfill(t, i, d)
+                if self.extend:
+                    self._backfill(t, i, d)
 
         # 3. Drop faces not confirmed for --hold seconds or out of the picture.
         keep = [t for t in self.tracks if i - t.last_seen <= self.hold and visible(t.box, W, H)]
@@ -393,6 +402,10 @@ class Analyzer:
         r = self.o.smooth
         for t in self.tracks + self.retired:
             if k not in t.boxes:
+                continue
+            # Without extend, a face is blurred only from its first to its last
+            # detection: gaps between detections are filled, nothing before or after.
+            if not self.extend and not t.first_seen <= k <= t.last_seen:
                 continue
             raw = t.boxes[k]
             near = [to_state(t.boxes[j]) for j in range(k - r, k + r + 1) if j in t.boxes]
@@ -542,17 +555,26 @@ def writer_loop(q, opts, size, fps, stats, stop):
 # --------------------------------------------------------------------------- main
 
 def main():
-    ap = argparse.ArgumentParser(description="Blur faces in a live video stream (YuNet).")
+    ap = argparse.ArgumentParser(description="Blur faces in a live video stream.")
     ap.add_argument("source", help="webcam index (0), stream URL, or video file")
     ap.add_argument("output", nargs="?", help="video file or stream URL (rtmp://, rtsp://, srt://, udp://)")
     ap.add_argument("--show", action="store_true", help="show the blurred video in a window")
     ap.add_argument("--delay", type=float, default=0.5,
                     help="output delay in seconds, used to blur a face's first frames "
                          "and to re-fill gaps (0 = no delay, less protection)")
-    ap.add_argument("--detect-every", type=int, default=3, metavar="N",
-                    help="run the detector every N frames; optical flow tracks faces in between")
+    ap.add_argument("--detect-every", type=int, default=1, metavar="N",
+                    help="run the detector every N frames (default 1: every frame, so a face is "
+                         "blurred from its first frame); optical flow tracks faces in between. "
+                         "Raise it on a slow machine")
     ap.add_argument("--hold", type=float, default=1.0,
-                    help="seconds a face keeps being tracked and blurred after the detector loses it")
+                    help="seconds a face keeps being tracked after the detector loses it: longer "
+                         "gaps between two detections are not filled (with --extend it is also "
+                         "blurred this long after its last detection)")
+    ap.add_argument("--extend", action="store_true",
+                    help="also blur a face before its first detection (look-back within --delay) "
+                         "and up to --hold after its last one; safer for privacy, but the blur "
+                         "can show before a face appears or stay after it leaves. Default: blur "
+                         "only from the first to the last detection, filling the gaps between")
     ap.add_argument("--smooth", type=int, default=2, metavar="K",
                     help="smooth boxes over K frames before and after (needs --delay)")
     ap.add_argument("--fps", type=float, default=None, help="frame rate if the source does not report it")
@@ -561,7 +583,12 @@ def main():
     ap.add_argument("--max-retries", type=int, default=30, help="reconnect attempts for a lost stream")
     ap.add_argument("--method", choices=["gaussian", "pixelate"], default="gaussian")
     ap.add_argument("--strength", type=int, choices=[1, 2, 3], default=3)
-    ap.add_argument("--min-size", type=int, default=8, help="smallest face size in px")
+    ap.add_argument("--model", choices=MODELS, default=DEFAULT_MODEL,
+                    help="face detector: raccoon_s (default; accurate, finds small faces, "
+                         "wants a GPU for live video), raccoon_l (larger) or yunet "
+                         "(small and fast, any machine)")
+    ap.add_argument("--min-size", type=int, default=None,
+                    help="smallest face size in px (default: 8 for yunet, no limit otherwise)")
     ap.add_argument("--pad", type=float, default=0.2, help="margin around each face, 0..1")
     ap.add_argument("--shape", choices=["rect", "oval"], default="oval")
     ap.add_argument("--cpu", action="store_true", help="do not use an NVIDIA GPU")
@@ -575,6 +602,8 @@ def main():
         sys.exit("ffmpeg is needed for OUTPUT (install it, or use --show only)")
     if o.output and "://" not in o.output and Path(o.output).resolve() == Path(o.source).resolve():
         sys.exit("OUTPUT must not be the input file")
+    if o.min_size is None:
+        o.min_size = 8 if o.model == "yunet" else 0
     if not o.smooth or not o.delay:
         o.smooth = 0
 
@@ -590,8 +619,8 @@ def main():
         fps = 25.0
     H, W = first.shape[:2]
     live = is_live(o.source)
-    print("Face detector: YuNet (OpenCV)")
-    if not o.cpu:
+    print(use_model(o.model, o.cpu))
+    if o.model == "yunet" and not o.cpu:
         print(gpu_message(use_gpu()))
     print(f"Source: {W}x{H} @ {fps:.3f} fps ({'live' if live else 'realtime file' if o.realtime else 'file'}), "
           f"delay {o.delay:g} s, detector every {o.detect_every} frame(s)")

@@ -75,7 +75,8 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
 
     # Create once and reuse: loading the detector is the slow part.
-    fb = FaceBlurrer(model="yunet", method="gaussian", strength=3)
+    # model="yunet" is much faster and needs only OpenCV, but misses small faces.
+    fb = FaceBlurrer(model="raccoon_s", method="gaussian", strength=3)
     print(fb.device)
 
     if "--webcam" in sys.argv:

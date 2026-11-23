@@ -72,7 +72,7 @@ No face detector is perfect. Check a sample of the output by hand before sharing
 
 ## Live streams
 
-`blur_stream.py` blurs a webcam, an RTSP/RTMP/HTTP stream or a file as it plays, with YuNet:
+`blur_stream.py` blurs a webcam, an RTSP/RTMP/HTTP stream or a file as it plays:
 
 ```bash
 .venv/bin/python blur_stream.py 0 --show                              # webcam, preview window
@@ -80,7 +80,9 @@ No face detector is perfect. Check a sample of the output by hand before sharing
 .venv/bin/python blur_stream.py rtsp://camera/stream rtmp://server/live  # re-stream
 ```
 
-Between detections it follows faces with optical flow. Output is delayed by `--delay` seconds (default `0.5`), so a face is blurred from its first frame, not from when it is first detected. `--delay 0` leaves more faces exposed. If the machine is too slow, frames are dropped, never sent unblurred. No sound.
+The blur is frame-accurate: faces are detected in every frame, and a face is blurred from its first to its last detection. Output is delayed by `--delay` seconds (default `0.5`) so that a face the detector misses for a few frames stays blurred in between. `--extend` also blurs a face a little before and after it is detected (safer for privacy, but the blur can show before a face appears). On a slow machine, `--detect-every 3` runs the detector less often and follows faces with optical flow in between. If the machine is too slow, frames are dropped, never sent unblurred. No sound.
+
+`raccoon_s` keeps up with live video on an NVIDIA or Apple GPU; on a CPU only, add `--model yunet` (or `--detect-every 6`) to drop fewer frames.
 
 ## Use it from your own code
 
@@ -89,7 +91,7 @@ Between detections it follows faces with optical flow. Output is delayed by `--d
 ```python
 from faceblur import FaceBlurrer
 
-fb = FaceBlurrer()                          # model="yunet", method="gaussian", strength=3, ...
+fb = FaceBlurrer()                          # model="raccoon_s", method="gaussian", strength=3, ...
 boxes = fb.detect(img)                      # BGR numpy image -> [(x, y, w, h), ...]
 out = fb.blur(img)                          # blurred copy
 fb.blur_file("in.jpg", "out.jpg")           # image file -> number of faces
