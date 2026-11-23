@@ -19,6 +19,8 @@ only shows the analysis step.
     python quickstart.py                                                             # the sample clip
 """
 import argparse
+import threading
+import time
 from pathlib import Path
 
 import cv2
@@ -75,35 +77,58 @@ def main():
     live = fb.stream(fps=video.fps, detect_every=args.detect_every, delay=args.delay)
 
     stats = Stats()                                   # fps and speed, drawn on the frame
+    analysis = [0.0]                                  # seconds the last put() took
 
-    def show(res, t):                                 # one analysed frame -> output; False to stop
+    def show(res):                                    # one analysed frame -> output; False to stop
         # res.original  the input frame, unchanged
         # res.blurred   a blurred copy (None with --no-mask: mask res.boxes yourself)
         # res.boxes     the faces, [(x, y, w, h), ...]
         # res.scores    the confidence of each face
-        out = res.original.copy() if res.blurred is None else res.blurred
+        out = res.original.copy() if res.blurred is None else res.blurred.copy()
         if args.show_scores:
             draw_faces(out, res.boxes, res.scores)
-        stats.draw(out, t, faces=len(res.boxes), dropped=video.dropped)
+        stats.draw(out, stats.start() - analysis[0], faces=len(res.boxes), dropped=video.dropped)
         if sink:
             sink.write(out)
             return True
         cv2.imshow("face-blur (q to quit)", out)
         return cv2.waitKey(1) & 0xFF != ord("q")
 
-    stop = False
-    for frame in video:
-        t = stats.start()
-        live.put(frame)                               # analyse one frame, add it to the buffer
-        while (res := live.get()) is not None:        # the frames that have `--delay` newer ones behind
-            if not show(res, t):
-                stop = True
-                break
-        if stop:
+    # Input thread: decode -> put (analyse, buffer). Output (this thread): one frame per tick of
+    # its own clock at the source frame rate, so the output frame rate stays steady even when
+    # frames arrive unevenly or analysis time varies.
+    done, stop = threading.Event(), threading.Event()
+
+    def read():
+        try:
+            for frame in video:
+                if stop.is_set():
+                    break
+                t = time.perf_counter()
+                live.put(frame)
+                analysis[0] = time.perf_counter() - t
+        finally:
+            done.set()
+
+    threading.Thread(target=read, daemon=True).start()
+    tick, last = 1.0 / video.fps, None
+    next_t = time.perf_counter()
+    while True:
+        while live.ready > 2:                         # output fell behind: skip to keep the delay
+            live.get()
+        res = live.get(force=done.is_set())           # at the end, empty the buffer
+        if res is None and done.is_set():
             break
-    else:
-        for res in live.flush():                      # --delay: the frames still held at the end
-            show(res, stats.start())
+        res = res or last                             # input late: show the last frame again
+        if res is not None:
+            last = res
+            if not show(res):
+                stop.set()
+                break
+        next_t += tick
+        time.sleep(max(0.0, next_t - time.perf_counter()))
+        if time.perf_counter() - next_t > tick:       # too far behind (slow display): resync the clock
+            next_t = time.perf_counter()
 
     if sink:
         sink.close()
