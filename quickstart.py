@@ -40,7 +40,7 @@ def main():
     ap.add_argument("--delay", type=float, default=0, metavar="SEC",
                     help="hold the output SEC seconds so later detections fix earlier frames: "
                          "e.g. 0.5: about half as many faces left unblurred (default 0 = no delay). "
-                         "Measured on the frames' capture times, so it holds when the fps changes")
+                         "Timed on when frames arrive, so it stays right when the fps changes")
     ap.add_argument("--threshold", type=float, default=None, metavar="T",
                     help="confidence a detection needs to count as a face, 0..1 (default: the "
                          "model's own, yolo11n 0.3, face_det_lite 0.55, yunet 0.7). Lower finds more faces "

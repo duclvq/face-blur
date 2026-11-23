@@ -27,21 +27,20 @@ fb = FaceBlurrer(                   # load the model once, then reuse it; defaul
     # mask=False,                   # uncomment to skip blurring: res.blurred is None, mask res.boxes yourself
 )
 live = fb.stream(                   # live video: detector + tracker between frames
-    fps=25,                         # frame rate of your source (times the frames when push() gets no t)
+    fps=25,                         # nominal frame rate of your source (for the tracker)
     # detect_every=3,               # uncomment for lower latency (2 or 3): detector on every 2nd or
                                     #   3rd frame only, faces moved by tracking in between (2 to 3x less
                                     #   work per frame). Default 1 = detector on every frame (most accurate)
     # delay=0.5,                    # uncomment for more accuracy: push() returns the frame from 0.5 s ago,
                                     #   fixed with what was seen since (faces found late are blurred back
                                     #   in time): ~half the misses. Default 0 = no delay
-    # hold=0.3,                     # seconds a face stays blurred after the detector loses it
 )
 
 for frame in frames:                # BGR numpy arrays (H x W x 3, uint8)
-    # live.fps = measured_fps       # if the source frame rate changes, update it here: the delay
-                                    #   stays 0.5 s (or pass the capture time: live.push(frame, t=ts))
-    # live.delay = 1.0              # the delay can also be changed while running
-    res = live.push(frame)          # this frame (with delay=0.5: the frame 0.5 s earlier)
+    # live.delay = 1.0              # the delay can be changed while running
+    res = live.push(frame)          # delay timed on when frames arrive; or push(frame, t=pts_seconds)
+                                    #   with the decoder's timestamps (needed for a file read faster
+                                    #   than real time). With delay=0.5: returns the frame 0.5 s earlier
     if res is None:                 # only with a delay: buffer still filling
         continue
     res.original                    # the input frame, unchanged
@@ -73,17 +72,16 @@ The same options exist on the command line (`quickstart.py`, `tools/`) and in Py
 > **The three settings that matter most** (in bold below):
 > - **`--model`**: `yolo11n_640` (default) or `yolo11n_1280` for small faces.
 > - **`--detect-every N`**: run the detector every N frames (default `1`); raise it on a slow machine.
-> - **`--delay SEC`**: hold the output SEC seconds so later frames fix earlier ones (default `0`; `0.5` leaves about half as many faces unblurred). Measured on frame times, so it stays right when the frame rate changes.
+> - **`--delay SEC`**: hold the output SEC seconds so later frames fix earlier ones (default `0`; `0.5` leaves about half as many faces unblurred). Timed on when frames arrive (or their timestamps), not on fps, so it stays right when the frame rate changes.
 
 | Command line | Python | Default | What it does | Trade-off |
 |---|---|---|---|---|
 | **`--model`** | `FaceBlurrer(model=)` | `yolo11n_640` | Face detector, see [Models](#models) | `yolo11n_1280`: more small faces, 3 to 4x slower |
 | **`--detect-every N`** | `fb.stream(detect_every=)` | `1` | Run the detector every N frames; tracking moves faces in between | N times less detector work; misses more fast or new faces |
-| **`--delay SEC`** | `fb.stream(delay=)`, `live.delay = x` while running | `0` (none) | Hold frames so later detections fix earlier ones: a new face is followed back to the frames the detector missed, a face found again is filled in between | `0.5`: about half as many faces left unblurred, output 0.5 s late. Timed with `push(frame, t=capture_time)` or `live.fps`, so a frame rate change keeps it 0.5 s |
+| **`--delay SEC`** | `fb.stream(delay=)`, `live.delay = x` while running | `0` (none) | Hold frames so later detections fix earlier ones: a new face is followed back to the frames the detector missed, a face found again is filled in between | `0.5`: about half as many faces left unblurred, output 0.5 s late. Timed on frame arrival or `push(frame, t=timestamp)`, not on fps, so a frame rate change keeps it 0.5 s |
 | `--threshold T` | `FaceBlurrer(threshold=)` | model's own: yolo11n 0.3, face_det_lite 0.55, yunet 0.7 | Confidence a detection needs to count as a face (0 to 1) | Lower: more faces found, more false ones |
 | `--tiles N` | `FaceBlurrer(tiles=)` | `1` (off) | Also detect on an N x N grid of overlapping tiles, so small faces are seen larger | 1 + N×N detector runs per frame. Helps `face_det_lite`; YOLO rarely needs it |
 | `--min-size PX` | `FaceBlurrer(min_size=)` | `0` (`24` for yunet) | Skip faces smaller than PX pixels | Fewer false small faces, misses distant ones |
-| `--hold SEC` (`blur_live.py`) | `fb.stream(hold=)` | `0.3` | A face the detector lost stays blurred this long, following optical flow | Longer: fewer flickers, blur may stay after the face has gone |
 | `--low-score S` (`blur_live.py`) | `fb.stream(low_score=)` | `0.3` | ByteTrack second stage: detections between this and the threshold keep a known face tracked | `0` turns it off |
 | `--cpu` | `FaceBlurrer(gpu=False)` | off | Detector on the CPU only, never the Qualcomm NPU | |
 

@@ -22,6 +22,7 @@ The detector is chosen per process (detector keeps it in module state), so
 use one model per process. Images are BGR numpy arrays, as from cv2.imread or
 cv2.VideoCapture.
 """
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -117,9 +118,9 @@ class FaceBlurrer:
 
     # ---------------------------------------------------------------- live
 
-    def stream(self, fps, detect_every=1, hold=0.3, low_score=0.3, delay=0):
+    def stream(self, fps, detect_every=1, low_score=0.3, delay=0):
         """A StreamBlurrer for live frames; see that class."""
-        return StreamBlurrer(self, fps, detect_every, hold, low_score, delay)
+        return StreamBlurrer(self, fps, detect_every, low_score, delay)
 
 
 class StreamBlurrer:
@@ -129,7 +130,7 @@ class StreamBlurrer:
     low-score detections, low_score .. the normal threshold, keep an existing
     face tracked; 0 = off). Between detector runs (detect_every) and for a
     face the detector just lost, the box follows optical flow; a lost face
-    stays blurred for `hold` seconds (0 = only faces the detector found).
+    stays blurred for 0.3 s (tracker.HOLD).
 
     push(frame) returns a FrameResult: the original frame, the blurred frame
     and the face boxes. The input frame is not changed.
@@ -141,36 +142,25 @@ class StreamBlurrer:
     seconds earlier (None while the buffer fills); flush() returns the rest
     at the end of the stream. 0.5 s halves the faces left unblurred.
 
-    The delay is measured on frame timestamps: push(frame, t) with t the
-    capture time in seconds (e.g. from the decoder) keeps it right when the
-    frame rate changes or frames are dropped; without t, frames are taken to
-    be 1 / fps apart, and `live.fps = x` updates that rate while running. `live.delay = x` changes it while running: a longer
+    The delay is measured on the time base of the incoming frames, not on
+    fps: push(frame, t) with t the frame's capture or presentation time in
+    seconds (from the decoder or the file); without t, the time push() is
+    called. So it stays `delay` seconds when the frame rate changes or frames
+    are dropped. For a file processed faster or slower than real time, pass
+    the file's timestamps. `live.delay = x` changes it while running: a longer
     delay pauses the output until the buffer has filled; a shorter one skips
     the frames that are now too old (push() returns the newest due frame).
     """
 
-    def __init__(self, blurrer, fps, detect_every=1, hold=0.3, low_score=0.3, delay=0):
+    def __init__(self, blurrer, fps, detect_every=1, low_score=0.3, delay=0):
         from tracker import Analyzer, Lookahead  # imported here: only needed for streams
-        if fps <= 0 or detect_every < 1 or hold < 0 or delay < 0:
-            raise ValueError("need fps > 0, detect_every >= 1, hold >= 0, delay >= 0")
-        self.fb, self._fps = blurrer, fps
-        opts = SimpleNamespace(hold=hold, detect_every=detect_every,
+        if fps <= 0 or detect_every < 1 or delay < 0:
+            raise ValueError("need fps > 0, detect_every >= 1, delay >= 0")
+        self.fb = blurrer
+        opts = SimpleNamespace(detect_every=detect_every,
                                min_size=blurrer.min_size, low_score=low_score)
         self.analyzer = Analyzer(opts, fps)
         self.lookahead = Lookahead(self.analyzer, delay)
-        self.t = None  # timestamp of the last frame pushed
-
-    @property
-    def fps(self):
-        """Frame rate used to time frames pushed without t; can be updated
-        while running (e.g. live.fps = measured_fps) when the source changes."""
-        return self._fps
-
-    @fps.setter
-    def fps(self, value):
-        if value <= 0:
-            raise ValueError("fps must be > 0")
-        self._fps = value
 
     @property
     def delay(self):
@@ -184,12 +174,11 @@ class StreamBlurrer:
         self.lookahead.delay = seconds
 
     def push(self, frame, t=None):
-        """Analyse the next frame (t: its capture time in seconds; default:
-        1 / fps after the previous one). Returns its FrameResult; with a
-        delay, the FrameResult of the frame `delay` seconds earlier (None
-        while the buffer fills)."""
-        t = (0.0 if self.t is None else self.t + 1.0 / self.fps) if t is None else float(t)
-        self.t = t
+        """Analyse the next frame (t: its capture or presentation time in
+        seconds; default: now, when it arrives). Returns its FrameResult;
+        with a delay, the FrameResult of the frame `delay` seconds earlier
+        (None while the buffer fills)."""
+        t = time.monotonic() if t is None else float(t)
         if self.lookahead.delay <= 0 and not self.lookahead.buf:
             return self._result(frame, self.analyzer.push(frame))
         out = self.lookahead.push(frame, t)

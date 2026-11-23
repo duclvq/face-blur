@@ -19,7 +19,7 @@ How it works:
     also before ByteTrack confirms the track.
   * Between detector runs, and for a face the detector just lost, the box is
     moved with sparse Lucas-Kanade optical flow. A lost face stays blurred for
-    --hold seconds (0 = only faces found by the detector).
+    HOLD seconds (0.3).
   * Scene cuts reset tracking, so a box never jumps across a cut.
   * Fail closed: if analysing a frame fails, that frame is blurred whole.
 """
@@ -106,6 +106,9 @@ def flow_box(g0, g1, box):
 
 # --------------------------------------------------------------------------- scene cuts
 
+
+HOLD = 0.3  # seconds a face the detector lost stays blurred, following optical flow
+
 class SceneCut:
     """Content jump much larger than the recent frame-to-frame change."""
 
@@ -148,7 +151,7 @@ class Analyzer:
     def __init__(self, opts, fps):
         self.o = opts
         self.fps = fps
-        self.hold = round(opts.hold * fps)
+        self.hold = round(HOLD * fps)
         self.low = getattr(opts, "low_score", 0.3)  # 0 = one-stage association only
         self.cut = SceneCut()
         self.prev_gray = None
@@ -233,7 +236,7 @@ class Analyzer:
 
         out = []
         for k, f in self.faces.items():
-            # Found at the last detector run, or lost for at most --hold.
+            # Found at the last detector run, or lost for at most HOLD seconds.
             if i - f.last_seen < o.detect_every or i - f.last_seen <= self.hold:
                 c = clip_box(f.box, W, H)
                 if c[2] - c[0] >= 2 and c[3] - c[1] >= 2:

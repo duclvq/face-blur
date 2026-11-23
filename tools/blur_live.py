@@ -3,7 +3,7 @@
 
 Usage:
     python tools/blur_live.py SOURCE [--show] [--model face_det_lite|yunet|...]
-                              [--detect-every 3] [--hold 0.3] ...
+                              [--detect-every 3] ...
 
 SOURCE is a webcam index (0), an RTSP/RTMP/HTTP/UDP URL, or a video file.
 --show previews the blurred frames; without it the run only prints timings.
@@ -99,9 +99,6 @@ def main():
     ap.add_argument("--detect-every", type=int, default=1, metavar="N",
                     help="run the detector every N frames (default 1: every frame); optical "
                          "flow moves faces in between. Raise it on a slow machine")
-    ap.add_argument("--hold", type=float, default=0.3, metavar="SEC",
-                    help="keep blurring a face the detector lost for SEC seconds, following "
-                         "it with optical flow (0 = only faces the detector found)")
     ap.add_argument("--low-score", type=float, default=0.3, metavar="S",
                     help="ByteTrack second stage: detections scoring S up to the normal "
                          "threshold keep an existing face tracked (never start a new one). "
@@ -145,8 +142,8 @@ def main():
         if o.model != npu_model:
             print(f"--npu uses {npu_model} (not {o.model})")
         o.model = npu_model
-    if o.detect_every < 1 or o.hold < 0 or not 0 <= o.pad <= 1:
-        ap.error("--detect-every >= 1, --hold >= 0, --pad 0..1")
+    if o.detect_every < 1 or not 0 <= o.pad <= 1:
+        ap.error("--detect-every >= 1, --pad 0..1")
     if o.min_size is None:
         o.min_size = 8 if o.model == "yunet" else 0
 
