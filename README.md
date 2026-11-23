@@ -83,17 +83,6 @@ The same options exist on the command line (`quickstart.py`, `tools/`) and in Py
 | `--low-score S` (`blur_live.py`) | `fb.stream(low_score=)` | `0.3` | ByteTrack second stage: detections between this and the threshold keep a known face tracked | `0` turns it off |
 | `--cpu` | `FaceBlurrer(gpu=False)` | off | Detector on the CPU only, never the Qualcomm NPU | |
 
-Typical settings:
-
-```bash
-python quickstart.py --input clip.mp4                                          # default: yolo11n_640, every frame, no delay
-python quickstart.py --input clip.mp4 --model yolo11n_1280 --delay 0.5         # most accurate: small faces, 0.5 s delay
-python quickstart.py --input clip.mp4 --model yolo11n_1280 --delay 1           # longer buffer: 1 s delay (not measured)
-python quickstart.py --input clip.mp4 --detect-every 5 --delay 0.5             # slow machine: 3x less work, the 0.5 s delay fills the gaps
-python quickstart.py --input rtsp://camera/stream --delay 0.5                  # 0.5 s behind the camera, about half the misses
-python quickstart.py --input clip.mp4 --model face_det_lite --tiles 2          # Qualcomm's detector, tiles for small faces (no delay)
-```
-
 ### Blur (mask) and display
 
 | Command line | Python | Default | What it does |
