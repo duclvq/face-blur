@@ -35,30 +35,30 @@ The first run sets itself up, which takes a few minutes.
 
 | `--model` | When to use it |
 |---|---|
-| `yunet` (default) | Fast, works on any machine, fast enough for live video. Misses small faces. |
-| `raccoon_s` | Best results. Finds small and hard-to-see faces, and in videos follows faces from frame to frame. Much slower. |
+| `raccoon_s` (default) | Best results. Finds small and hard-to-see faces, and in videos follows faces from frame to frame. Slow on a laptop. |
 | `raccoon_l` | Like `raccoon_s`, larger and slower. |
+| `yunet` | Old or low-end machines. Much faster, but misses small faces. |
 
-The raccoon models come from [InsightFace](https://github.com/deepinsight/insightface) and are for **non-commercial research only**; YuNet is MIT-licensed. The examples above were made with `--model raccoon_s`.
+The raccoon models come from [InsightFace](https://github.com/deepinsight/insightface) and are for **non-commercial research only**. For commercial use, use `--model yunet` (MIT license).
 
 ## Options
 
 Add them after the input (and optional output folder):
 
 ```bash
-./run.sh ~/photos/dataset ~/photos/out --model raccoon_s --method pixelate
+./run.sh ~/photos/dataset ~/photos/out --model yunet --method pixelate
 ```
 
 | Option | Default | What it does |
 |---|---|---|
-| `--model` | `yunet` | Face detector, see above |
+| `--model` | `raccoon_s` | Face detector, see above |
 | `--method gaussian\|pixelate` | `gaussian` | Smooth blur or pixel blocks |
 | `--strength 1..3` | `3` | 1 = light, 3 = heavy |
 | `--shape oval\|rect` | `oval` | Blur an oval around the face, or the whole box (safer) |
 | `--pad 0..1` | `0.15` | Extra margin around each face (`0.4` also hides hair) |
-| `--min-size N` | `24` (off for raccoon) | Skip faces smaller than N pixels |
+| `--min-size N` | off (`24` for yunet) | Skip faces smaller than N pixels |
 | `--cpu` | off | Don't use the GPU. By default an NVIDIA or Apple GPU is used when there is one, else the CPU |
-| `--analysis-fps N` | `15` | Videos, raccoon: face scans per second. Use `30` for fast motion |
+| `--analysis-fps N` | `15` | Videos: face scans per second. Use `30` for fast motion |
 
 See [`examples/options`](examples/options) for what each option looks like.
 
