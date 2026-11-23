@@ -22,6 +22,7 @@ The detector is chosen per process (detector keeps it in module state), so
 use one model per process. Images are BGR numpy arrays, as from cv2.imread or
 cv2.VideoCapture.
 """
+import copy
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -137,15 +138,21 @@ class StreamBlurrer:
     delay (frames, default 0 = none; e.g. 12, about 0.5 s at 25 fps) holds
     that many frames so that later detections fix earlier frames: a new face
     is followed back through the frames the detector missed it in, and a face
-    found again is filled in the frames between. push() then returns the
-    FrameResult of the frame `delay` frames earlier: one frame out per frame
-    in, None while the buffer fills; flush() returns the rest at the end of
-    the stream. About 0.5 s worth of frames halves the faces left unblurred.
+    found again is filled in the frames between. About 0.5 s worth of frames
+    halves the faces left unblurred.
 
-    `live.delay = n` changes it inside the loop (e.g. when the frame rate
-    changes): a larger delay returns None until the buffer has grown; a
-    smaller one skips the oldest held frames at once (counted in skipped).
+    push() always returns a FrameResult, one per frame in, so the output
+    stream never stalls. The held delay moves towards `delay` by one frame
+    every RAMP pushes: to grow it (at the start, or after `live.delay = n`
+    with a larger n) the previous result is returned once more (its
+    `repeated` is True; write it anyway to keep the frame rate); to shrink
+    it one old frame is skipped (counted in `skipped`). So the first frames
+    go out at once with less correction, and a change takes RAMP x the
+    difference in frames to settle. flush() returns the frames still held at
+    the end of the stream.
     """
+
+    RAMP = 4  # pushes per one-frame step of the held delay (1 frame in 4 repeated or skipped)
 
     def __init__(self, blurrer, fps, detect_every=1, low_score=0.3, delay=0):
         from tracker import Analyzer, Lookahead  # imported here: only needed for streams
@@ -155,30 +162,46 @@ class StreamBlurrer:
         opts = SimpleNamespace(detect_every=detect_every,
                                min_size=blurrer.min_size, low_score=low_score)
         self.analyzer = Analyzer(opts, fps)
-        self.lookahead = Lookahead(self.analyzer, 0)
+        self.lookahead = Lookahead(self.analyzer, 0)  # its delay is the one held now
         self.delay = delay
-        self.skipped = 0  # held frames skipped because the delay was made smaller
+        self.skipped = 0      # frames skipped to shrink the held delay
+        self.repeated = 0     # results returned twice to grow it
+        self._n, self._last = 0, None
 
     @property
     def delay(self):
-        """Frames the output is held; can be changed inside the loop."""
-        return self.lookahead.delay
+        """Target delay in frames; can be changed inside the loop."""
+        return self._target
 
     @delay.setter
     def delay(self, frames):
         if frames < 0 or int(frames) != frames:
             raise ValueError("delay is a whole number of frames >= 0")
-        self.lookahead.delay = int(frames)
+        self._target = int(frames)
+
+    @property
+    def held(self):
+        """Frames held right now (moves towards `delay`)."""
+        return self.lookahead.delay
 
     def push(self, frame):
-        """Analyse the next frame. Returns its FrameResult; with a delay, the
-        FrameResult of the frame `delay` frames earlier (None while the
-        buffer fills)."""
-        if self.lookahead.delay <= 0 and not self.lookahead.buf:
+        """Analyse the next frame. Returns a FrameResult: the frame `held`
+        frames earlier, or the previous result again while the delay grows."""
+        la = self.lookahead
+        if self._target == 0 and la.delay == 0 and not la.buf:
             return self._result(frame, self.analyzer.push(frame))
-        out = self.lookahead.push(frame)
-        self.skipped += max(0, len(out) - 1)  # the delay was made smaller
-        return self._result(*out[-1]) if out else None
+        self._n += 1
+        if self._n % self.RAMP == 0 and la.delay != self._target:
+            la.delay += 1 if self._target > la.delay else -1
+        out = la.push(frame)
+        if out:
+            self.skipped += len(out) - 1
+            self._last = self._result(*out[-1])
+            return self._last
+        self.repeated += 1  # the held delay just grew: no frame is due
+        r = copy.copy(self._last)
+        r.repeated = True
+        return r
 
     def flush(self):
         """With a delay: the FrameResults still held, at the end of the stream."""
@@ -199,6 +222,8 @@ class FrameResult:
                 whole frame pixelated, so nothing is shown unblurred)
     blurred  -- a blurred copy of the frame (made on first use);
                 None with FaceBlurrer(mask=False)
+    repeated -- True if this is the previous result again (the stream delay
+                is growing); write it as usual to keep the frame rate
     """
 
     def __init__(self, frame, faces, failed, blurrer):
@@ -206,6 +231,7 @@ class FrameResult:
         self.boxes = [f[:4] for f in faces]
         self.scores = [f[4] for f in faces]
         self._fb, self._blurred = blurrer, None
+        self.repeated = False
 
     @property
     def blurred(self):

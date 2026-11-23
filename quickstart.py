@@ -93,9 +93,7 @@ def main():
 
     for frame in video:
         t = stats.start()
-        res = live.push(frame)                        # analyse one frame
-        if res is None:                               # --delay: the buffer is still filling
-            continue
+        res = live.push(frame)                        # analyse one frame; always one result back
         if not show(res, t):
             break
     else:

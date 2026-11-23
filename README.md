@@ -37,15 +37,15 @@ live = fb.stream(                   # live video: detector + tracker between fra
 )
 
 for frame in frames:                # BGR numpy arrays (H x W x 3, uint8)
-    # live.delay = 25               # the delay can be changed in the loop, e.g. if the fps changes
-    res = live.push(frame)          # one frame in, one out; with delay=12: the frame 12 frames earlier
-    if res is None:                 # only with a delay: buffer still filling
-        continue
+    # live.delay = 25               # the delay can be changed in the loop, e.g. if the fps changes;
+                                    #   it moves there smoothly, 1 frame per 4 (never a gap in the output)
+    res = live.push(frame)          # always one result per frame; with delay=12: the frame 12 earlier
+                                    #   (res.repeated: the previous frame again while the delay grows)
     res.original                    # the input frame, unchanged
     res.blurred                     # a blurred copy (None with mask=False)
     res.boxes                       # the blurred faces: [(x, y, w, h), ...]
     res.scores                      # the confidence of each face
-for res in live.flush():            # with a delay, at the end: the frames still held
+for res in live.flush():            # with a delay, at the end of a file: the frames still held
     ...
 ```
 
@@ -87,7 +87,7 @@ The same options exist on the command line (`quickstart.py`, `tools/`) and in Py
 > **The three settings that matter most** (in bold below):
 > - **`--model`**: `yolo11n_640` (default) or `yolo11n_1280` for small faces.
 > - **`--detect-every N`**: run the detector every N frames (default `1`); raise it on a slow machine.
-> - **`--delay FRAMES`**: hold the output this many frames so later frames fix earlier ones (default `0`; about 0.5 s worth, e.g. `12` at 25 fps, leaves half as many faces unblurred). Can be changed in the loop (`live.delay = n`).
+> - **`--delay FRAMES`**: hold the output this many frames so later frames fix earlier ones (default `0`; about 0.5 s worth, e.g. `12` at 25 fps, leaves half as many faces unblurred). Can be changed in the loop (`live.delay = n`); the output never stalls, the delay moves there one frame per 4.
 
 | Command line | Python | Default | What it does | Trade-off |
 |---|---|---|---|---|

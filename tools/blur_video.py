@@ -79,8 +79,8 @@ def main():
             ok, frame = cap.read()
             if not ok:
                 break
-            res = live.push(frame)          # None at first if a delay is set
-            if res is not None:
+            res = live.push(frame)
+            if not res.repeated:            # a file keeps every frame once (repeats are for live output)
                 out.write(res.blurred)
                 n += 1
         for res in live.flush():            # the frames still held at the end
