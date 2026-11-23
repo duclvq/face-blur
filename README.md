@@ -37,7 +37,6 @@ live = fb.stream(                   # live video: detector + tracker between fra
 )
 
 for frame in frames:                # BGR numpy arrays (H x W x 3, uint8)
-    # live.delay = 1.0              # the delay can be changed while running
     res = live.push(frame)          # delay timed on when frames arrive; or push(frame, t=pts_seconds)
                                     #   with the decoder's timestamps (needed for a file read faster
                                     #   than real time). With delay=0.5: returns the frame 0.5 s earlier
