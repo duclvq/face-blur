@@ -50,6 +50,23 @@ for res in live.flush():            # with a delay, at the end: the frames still
     ...
 ```
 
+Images (no tracking, no delay):
+
+```python
+import cv2
+from faceblur import FaceBlurrer
+
+fb = FaceBlurrer()                  # same arguments as above
+fb.blur_file("in.jpg", "out.jpg")   # an image file; returns the number of faces blurred
+img = cv2.imread("in.jpg")
+out = fb.blur(img)                  # a BGR array -> blurred copy
+boxes = fb.detect(img)              # [(x, y, w, h), ...] if you mask the faces yourself
+```
+
+```bash
+python tools/blur_images.py photos/ photos_blurred/   # a whole folder (same options as quickstart.py)
+```
+
 ## Models
 
 | `--model` | Use it for | Size | Mac M4 CPU | IQ-9075 | QCS8550 | X Elite | RB3 Gen 2 |

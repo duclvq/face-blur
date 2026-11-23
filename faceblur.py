@@ -161,6 +161,7 @@ class StreamBlurrer:
                                min_size=blurrer.min_size, low_score=low_score)
         self.analyzer = Analyzer(opts, fps)
         self.lookahead = Lookahead(self.analyzer, delay)
+        self.skipped = 0  # old frames skipped to catch up (delay shortened, long stall)
 
     @property
     def delay(self):
@@ -182,6 +183,7 @@ class StreamBlurrer:
         if self.lookahead.delay <= 0 and not self.lookahead.buf:
             return self._result(frame, self.analyzer.push(frame))
         out = self.lookahead.push(frame, t)
+        self.skipped += max(0, len(out) - 1)  # catching up after a longer stall
         return self._result(*out[-1]) if out else None
 
     def flush(self):

@@ -266,13 +266,18 @@ class Lookahead:
     dropped, and `delay` can be changed while running.
 
     push(frame, t) returns the (frame, faces) pairs that leave the buffer,
-    oldest first: those `delay` seconds or more older than `t` (none while it
-    fills); flush() the rest.
+    oldest first. Once the buffer spans `delay` seconds it releases one frame
+    per push, so uneven arrival (jitter) changes the delay a little but never
+    drops a frame or leaves a gap. Only when the buffer drifts more than
+    `margin` away from `delay` (the delay or the frame rate changed, a stall)
+    does it hold frames (returns []) or release extra old ones to catch up.
+    flush() returns the rest.
     """
 
     def __init__(self, analyzer, delay):
         self.an, self.delay = analyzer, delay
         self.buf = deque()       # [i, frame, gray, faces or None, t]
+        self.filled = False      # the buffer reached `delay` once: one out per push
         self.seen = {}           # track id -> (frame index, box) where last present
         self.i = 0
 
@@ -293,8 +298,16 @@ class Lookahead:
                 self.seen[tid] = (i, box)
         self.buf.append([i, frame, gray, faces, t])
         out = []
-        while self.buf and t - self.buf[0][4] >= self.delay - 1e-6:
-            out.append(self._emit(self.buf.popleft()))
+        margin = max(0.08, 0.2 * self.delay)
+        span = t - self.buf[0][4]
+        if span >= self.delay - 1e-6:
+            self.filled = True
+        if self.filled and span >= self.delay - margin:
+            out.append(self._emit(self.buf.popleft()))          # the regular one
+            while self.buf and t - self.buf[0][4] > self.delay + margin:
+                out.append(self._emit(self.buf.popleft()))      # catch up
+        elif self.filled:
+            self.filled = False                                  # too short: let it grow back
         if i % 100 == 0:  # forget faces last seen before the buffer
             first = self.buf[0][0] if self.buf else i
             self.seen = {k: v for k, v in self.seen.items() if v[0] >= first - 1}
