@@ -22,7 +22,6 @@ The detector is chosen per process (detector keeps it in module state), so
 use one model per process. Images are BGR numpy arrays, as from cv2.imread or
 cv2.VideoCapture.
 """
-import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -135,55 +134,50 @@ class StreamBlurrer:
     push(frame) returns a FrameResult: the original frame, the blurred frame
     and the face boxes. The input frame is not changed.
 
-    delay (seconds, default 0 = none; e.g. 0.5) holds frames so that later
-    detections fix earlier frames: a new face is followed back through the
-    frames the detector missed it in, and a face found again is filled in the
-    frames between. push() then returns the FrameResult of the frame `delay`
-    seconds earlier (None while the buffer fills); flush() returns the rest
-    at the end of the stream. 0.5 s halves the faces left unblurred.
+    delay (frames, default 0 = none; e.g. 12, about 0.5 s at 25 fps) holds
+    that many frames so that later detections fix earlier frames: a new face
+    is followed back through the frames the detector missed it in, and a face
+    found again is filled in the frames between. push() then returns the
+    FrameResult of the frame `delay` frames earlier: one frame out per frame
+    in, None while the buffer fills; flush() returns the rest at the end of
+    the stream. About 0.5 s worth of frames halves the faces left unblurred.
 
-    The delay is measured on the time base of the incoming frames, not on
-    fps: push(frame, t) with t the frame's capture or presentation time in
-    seconds (from the decoder or the file); without t, the time push() is
-    called. So it stays `delay` seconds when the frame rate changes or frames
-    are dropped. For a file processed faster or slower than real time, pass
-    the file's timestamps. `live.delay = x` changes it while running: a longer
-    delay pauses the output until the buffer has filled; a shorter one skips
-    the frames that are now too old (push() returns the newest due frame).
+    `live.delay = n` changes it inside the loop (e.g. when the frame rate
+    changes): a larger delay returns None until the buffer has grown; a
+    smaller one skips the oldest held frames at once (counted in skipped).
     """
 
     def __init__(self, blurrer, fps, detect_every=1, low_score=0.3, delay=0):
         from tracker import Analyzer, Lookahead  # imported here: only needed for streams
-        if fps <= 0 or detect_every < 1 or delay < 0:
-            raise ValueError("need fps > 0, detect_every >= 1, delay >= 0")
+        if fps <= 0 or detect_every < 1:
+            raise ValueError("need fps > 0, detect_every >= 1")
         self.fb = blurrer
         opts = SimpleNamespace(detect_every=detect_every,
                                min_size=blurrer.min_size, low_score=low_score)
         self.analyzer = Analyzer(opts, fps)
-        self.lookahead = Lookahead(self.analyzer, delay)
-        self.skipped = 0  # old frames skipped to catch up (delay shortened, long stall)
+        self.lookahead = Lookahead(self.analyzer, 0)
+        self.delay = delay
+        self.skipped = 0  # held frames skipped because the delay was made smaller
 
     @property
     def delay(self):
-        """Seconds the output is held; can be changed while running."""
+        """Frames the output is held; can be changed inside the loop."""
         return self.lookahead.delay
 
     @delay.setter
-    def delay(self, seconds):
-        if seconds < 0:
-            raise ValueError("delay must be >= 0")
-        self.lookahead.delay = seconds
+    def delay(self, frames):
+        if frames < 0 or int(frames) != frames:
+            raise ValueError("delay is a whole number of frames >= 0")
+        self.lookahead.delay = int(frames)
 
-    def push(self, frame, t=None):
-        """Analyse the next frame (t: its capture or presentation time in
-        seconds; default: now, when it arrives). Returns its FrameResult;
-        with a delay, the FrameResult of the frame `delay` seconds earlier
-        (None while the buffer fills)."""
-        t = time.monotonic() if t is None else float(t)
+    def push(self, frame):
+        """Analyse the next frame. Returns its FrameResult; with a delay, the
+        FrameResult of the frame `delay` frames earlier (None while the
+        buffer fills)."""
         if self.lookahead.delay <= 0 and not self.lookahead.buf:
             return self._result(frame, self.analyzer.push(frame))
-        out = self.lookahead.push(frame, t)
-        self.skipped += max(0, len(out) - 1)  # catching up after a longer stall
+        out = self.lookahead.push(frame)
+        self.skipped += max(0, len(out) - 1)  # the delay was made smaller
         return self._result(*out[-1]) if out else None
 
     def flush(self):

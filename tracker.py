@@ -3,8 +3,8 @@
 Analyzer(opts, fps).push(frame) returns the faces of that frame as
 (x, y, w, h, score, track_id), or None if analysing it failed (then blur the
 whole frame). score is the detector confidence at the face's last detection.
-Lookahead(analyzer, delay) adds an optional delay (seconds, measured on frame
-timestamps) that uses the frames after a detection to fix the frames before it.
+Lookahead(analyzer, delay) adds an optional delay (a number of frames) that
+uses the frames after a detection to fix the frames before it.
 faceblur.StreamBlurrer wraps it; tools/blur_live.py is a preview CLI.
 
 How it works:
@@ -253,7 +253,7 @@ class Analyzer:
 # --------------------------------------------------------------------------- optional delay
 
 class Lookahead:
-    """Hold frames for `delay` seconds, so what is found later fixes them:
+    """Hold `delay` frames, so what is found later fixes them:
 
       * a face seen for the first time is followed back with optical flow
         through the held frames (the detector missed its first frames, or it
@@ -261,27 +261,20 @@ class Lookahead:
       * a face found again after it was lost (same ByteTrack id) is filled in
         the frames between, by interpolating its box.
 
-    The delay is measured on the frames' own timestamps (push(frame, t)), so
-    it stays `delay` seconds when the frame rate changes or frames are
-    dropped, and `delay` can be changed while running.
-
-    push(frame, t) returns the (frame, faces) pairs that leave the buffer,
-    oldest first. Once the buffer spans `delay` seconds it releases one frame
-    per push, so uneven arrival (jitter) changes the delay a little but never
-    drops a frame or leaves a gap. Only when the buffer drifts more than
-    `margin` away from `delay` (the delay or the frame rate changed, a stall)
-    does it hold frames (returns []) or release extra old ones to catch up.
-    flush() returns the rest.
+    push(frame) returns the (frame, faces) pairs that leave the buffer, oldest
+    first: one per push once `delay` frames are held, none while it fills.
+    `delay` can be changed while running: a larger one returns nothing until
+    the buffer has grown; a smaller one returns the extra old frames at once
+    (the caller keeps the newest). flush() returns the rest.
     """
 
     def __init__(self, analyzer, delay):
-        self.an, self.delay = analyzer, delay
-        self.buf = deque()       # [i, frame, gray, faces or None, t]
-        self.filled = False      # the buffer reached `delay` once: one out per push
+        self.an, self.delay = analyzer, int(delay)
+        self.buf = deque()       # [i, frame, gray, faces or None]
         self.seen = {}           # track id -> (frame index, box) where last present
         self.i = 0
 
-    def push(self, frame, t):
+    def push(self, frame):
         i = self.i
         self.i += 1
         faces = self.an.push(frame)
@@ -296,18 +289,10 @@ class Lookahead:
                 elif i - last[0] > 1:
                     self._gap(f, last, i, box)
                 self.seen[tid] = (i, box)
-        self.buf.append([i, frame, gray, faces, t])
+        self.buf.append([i, frame, gray, faces])
         out = []
-        margin = max(0.08, 0.2 * self.delay)
-        span = t - self.buf[0][4]
-        if span >= self.delay - 1e-6:
-            self.filled = True
-        if self.filled and span >= self.delay - margin:
-            out.append(self._emit(self.buf.popleft()))          # the regular one
-            while self.buf and t - self.buf[0][4] > self.delay + margin:
-                out.append(self._emit(self.buf.popleft()))      # catch up
-        elif self.filled:
-            self.filled = False                                  # too short: let it grow back
+        while len(self.buf) > self.delay:
+            out.append(self._emit(self.buf.popleft()))
         if i % 100 == 0:  # forget faces last seen before the buffer
             first = self.buf[0][0] if self.buf else i
             self.seen = {k: v for k, v in self.seen.items() if v[0] >= first - 1}

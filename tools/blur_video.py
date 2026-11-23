@@ -79,8 +79,7 @@ def main():
             ok, frame = cap.read()
             if not ok:
                 break
-            t = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000  # the file's own time base (faster than real time)
-            res = live.push(frame, t=t)     # None at first if a delay is set
+            res = live.push(frame)          # None at first if a delay is set
             if res is not None:
                 out.write(res.blurred)
                 n += 1
