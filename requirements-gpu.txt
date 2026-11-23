@@ -1,5 +1,0 @@
-# Optional: NVIDIA GPU (--gpu). Installs onnxruntime with CUDA and the
-# CUDA/cuDNN runtime libraries from pip, so no CUDA toolkit is needed; only a
-# recent NVIDIA driver. It replaces the CPU onnxruntime from requirements.txt:
-#   pip uninstall -y onnxruntime && pip install -r requirements-gpu.txt
-onnxruntime-gpu[cuda,cudnn]>=1.22

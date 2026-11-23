@@ -3,8 +3,8 @@
 `input/` is a small sample dataset (with a subfolder per category). The outputs were produced with:
 
 ```bash
-python blur_faces.py examples/input examples/output                                       # gaussian blur
-python blur_faces.py examples/input/sports examples/output_pixelate --method pixelate    # pixelate
+python tools/blur_images.py examples/input examples/output                                       # gaussian blur
+python tools/blur_images.py examples/input/sports examples/output_pixelate --method pixelate    # pixelate
 ```
 
 On Windows: `run.bat examples\input examples\output`
@@ -21,4 +21,6 @@ On Windows: `run.bat examples\input examples\output`
 
 Image credits: `team/*` and `crowd/*` are NASA photos (public domain, images.nasa.gov; the crowd photos are S70-17433 and S69-40022). `sports/football.jpg` is `messi5.jpg` from the OpenCV sample data. `crowd/film_set.jpg` is from https://i.redd.it/pa2mjlht85731.jpg (not public domain; copyright belongs to its owner).
 
-`video/street_before_after.*` shows `crowd_street.mp4` (from https://www.youtube.com/watch?v=b8QZJ5ZodTs, not public domain) before and after `blur_video.py` with the default model.
+`video/models_compare.*` is 15 s of https://www.youtube.com/watch?v=7F0Cy-RGOGY (Chongqing bar street at night; not public domain, copyright belongs to its owner) blurred by each built-in model; made with `FaceBlurrer.stream()` at its defaults.
+
+`video/street_before_after.*` shows `crowd_street.mp4` (from https://www.youtube.com/watch?v=b8QZJ5ZodTs, not public domain) before and after `tools/blur_video.py` with the default model.

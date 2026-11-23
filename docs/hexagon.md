@@ -6,13 +6,12 @@ graphs). Expect to adjust things on the first real device.
 
 ## Default on Qualcomm: Lightweight-Face-Detection (face_det_lite)
 
-When onnxruntime has the QNN execution provider (`onnxruntime-qnn`), the
-default `--model` of every script and of `FaceBlurrer` is `face_det_lite`:
+`face_det_lite` is the default `--model` of every script and of `FaceBlurrer`:
 Qualcomm's [Lightweight-Face-Detection](https://huggingface.co/qualcomm/Lightweight-Face-Detection)
 (BSD-3-Clause, 878K parameters), Qualcomm AI Hub release v0.67.0, **float**
 precision (the most accurate one; the HTP runs it in fp16, as AI Hub does).
-Elsewhere the default stays `raccoon_s`; `--model face_det_lite` runs it on
-the CPU.
+It runs on the NPU when onnxruntime has the QNN execution provider
+(`onnxruntime-qnn`), on the CPU otherwise.
 
 | File (`models/face_det_lite/`) | |
 |---|---|
@@ -75,14 +74,14 @@ Then copy the repo (the models are in `models/`; rebuild with
 ## Run
 
 ```bash
-python blur_stream.py 0 out.mp4                           # face_det_lite when onnxruntime-qnn is installed
-python blur_stream.py 0 out.mp4 --npu                     # the same, and warn if QNN is missing
-python blur_stream.py 0 out.mp4 --npu yunet               # YuNet 960x544 a16w8
-python blur_stream.py in.mp4 out.mp4 --npu yunet:640x384 --npu-precision a8w8
+python tools/blur_live.py 0 --show                            # face_det_lite when onnxruntime-qnn is installed
+python tools/blur_live.py 0 --show --npu                      # the same, and warn if QNN is missing
+python tools/blur_live.py 0 --show --npu yunet               # YuNet 960x544 a16w8
+python tools/blur_live.py in.mp4 --show --npu yunet:640x384 --npu-precision a8w8
 ```
 
-From code: `FaceBlurrer(model="face_det_lite")`, `blur_faces.use_npu("face_det_lite")`,
-`blur_faces.use_npu("yunet", (960, 544), "a16w8")`, or `hexagon.QnnFaceDetLite` /
+From code: `FaceBlurrer(model="face_det_lite")`, `detector.use_npu("face_det_lite")`,
+`detector.use_npu("yunet", (960, 544), "a16w8")`, or `hexagon.QnnFaceDetLite` /
 `hexagon.QnnYuNet`.
 
 ## What to check on the device

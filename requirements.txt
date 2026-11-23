@@ -1,7 +1,7 @@
 opencv-python>=4.8
-# Default face detector (raccoon_s): InsightFace PrivateFrame. Its pretrained
-# models are for non-commercial research only. --model yunet needs only OpenCV.
-insightface[privateframe]>=2.1
+# Runs the YOLO11n-face (default) and face_det_lite detectors and the YuNet NPU models.
+# On Qualcomm hardware install onnxruntime-qnn instead, to use the Hexagon NPU
+# (see docs/hexagon.md): pip uninstall -y onnxruntime && pip install onnxruntime-qnn
 onnxruntime
 # bytetrack/ (vendored ByteTrack, MIT): Hungarian matching and Kalman filter
 scipy

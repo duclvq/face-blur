@@ -2,56 +2,61 @@
 
     from faceblur import FaceBlurrer
 
-    fb = FaceBlurrer()                         # raccoon_s, gaussian blur
+    fb = FaceBlurrer()                         # yolo11n_640, gaussian blur
     out = fb.blur(frame)                       # numpy BGR image -> blurred copy
     fb.blur_file("in.jpg", "out.jpg")          # image file
-    fb.blur_video("in.mp4", "out.mp4")         # video file (keeps sound with ffmpeg)
 
-    live = fb.stream(fps=30)                   # live frames (webcam, RTSP, ...)
+    live = fb.stream(fps=30)                   # live frames (RTSP, webcam, ...)
     for frame in frames:
-        for out in live.push(frame):           # comes out `delay` seconds later
-            show(out)
-    for out in live.flush():                   # the last buffered frames
-        show(out)
+        res = live.push(frame)                 # the frame 0.5 s earlier (delay=0.5)
+        if res is None:                        # buffer still filling
+            continue
+        res.original, res.blurred, res.boxes   # input, blurred copy, [(x, y, w, h)]
+        res.scores                             # confidence of each face
+    rest = live.flush()                        # the last 0.5 s, at the end
 
-See examples/quickstart.py for a runnable guide.
+See quickstart.py for a full live pipeline (RTSP, hardware decode, this API,
+hardware encode, live view). The library itself does not decode or encode video.
 
-The detector is chosen per process (blur_faces keeps it in module state), so
+The detector is chosen per process (detector keeps it in module state), so
 use one model per process. Images are BGR numpy arrays, as from cv2.imread or
 cv2.VideoCapture.
 """
-import shutil
-import time
 from pathlib import Path
 from types import SimpleNamespace
 
 import cv2
 
-import blur_faces
-from blur_faces import DEFAULT_MODEL, MODELS, blur_region, detect_faces
+import detector
+from detector import DEFAULT_MODEL, MODELS, blur_region, detect_faces
 
-__all__ = ["FaceBlurrer", "StreamBlurrer", "MODELS", "DEFAULT_MODEL"]
+__all__ = ["FaceBlurrer", "StreamBlurrer", "FrameResult", "MODELS", "DEFAULT_MODEL"]
 
 
 class FaceBlurrer:
     """Detect and blur faces.
 
-    model    -- "raccoon_s" (default, accurate, finds small faces), "raccoon_l"
-                (larger) -- InsightFace, non-commercial research only --
-                "yunet" (small and fast, MIT license, needs only OpenCV) or
+    model    -- "yolo11n_640" (default; YOLO11n-face, AGPL-3.0 weights),
+                "yolo11n_1280" (finds small faces, about 4x slower),
                 "face_det_lite" (Qualcomm Lightweight-Face-Detection, BSD-3;
-                the default on Qualcomm hardware, runs on the Hexagon NPU)
+                misses small faces) or "yunet" (simple scenes with large faces).
+                All but yunet run on the Hexagon NPU with onnxruntime-qnn
     method   -- "gaussian" or "pixelate"
     strength -- 1 (light) .. 3 (heavy)
     pad      -- margin around each face, as a fraction of its size (0..1)
     shape    -- "oval" (follows the face) or "rect" (whole box, safer)
     min_size -- skip faces smaller than this many pixels
-                (default: 24 for yunet, no limit for raccoon)
-    gpu      -- use an NVIDIA GPU when available (falls back to the CPU)
+                (default: 24 for yunet, no limit otherwise)
+    threshold -- confidence a detection needs to count as a face, 0..1
+                (default: the model's own, yolo11n 0.3, face_det_lite 0.55,
+                yunet 0.7). Lower finds more faces and more false ones
+    tiles    -- also detect on an N x N grid of overlapping tiles (1 = off):
+                finds smaller faces, costs 1 + N*N detector runs per frame
+    gpu      -- use the Qualcomm NPU when there is one (falls back to the CPU)
     """
 
     def __init__(self, model=DEFAULT_MODEL, method="gaussian", strength=3, pad=0.15,
-                 shape="oval", min_size=None, gpu=True):
+                 shape="oval", min_size=None, gpu=True, tiles=1, threshold=None):
         if model not in MODELS:
             raise ValueError(f"model must be one of {MODELS}, not {model!r}")
         if method not in ("gaussian", "pixelate"):
@@ -67,15 +72,11 @@ class FaceBlurrer:
         self.min_size = (24 if model == "yunet" else 0) if min_size is None else min_size
 
         try:
-            self.device = blur_faces.use_model(model, cpu=not gpu)
-        except SystemExit as e:  # blur_faces exits when InsightFace is missing
+            self.device = detector.use_model(model, cpu=not gpu)
+            detector.use_tiles(tiles)
+            detector.use_threshold(threshold)
+        except SystemExit as e:  # detector exits when a model cannot start
             raise RuntimeError(str(e)) from None
-        if model == "yunet" and gpu:
-            # Each image size needs a few seconds of GPU set-up, so a size only
-            # moves to the GPU after GPU_AFTER_IMAGES images of it (video frames
-            # all share one size; a mix of photo sizes stays fast on the CPU).
-            self.device += "; " + blur_faces.gpu_message(
-                blur_faces.use_gpu(gpu_after=blur_faces.GPU_AFTER_IMAGES))
 
     # ---------------------------------------------------------------- images
 
@@ -109,88 +110,84 @@ class FaceBlurrer:
             raise OSError(f"cannot write image: {dst}")
         return len(faces)
 
-    # ---------------------------------------------------------------- video
-
-    def blur_video(self, src, dst, detect_every=1, hold=10, analysis_fps=15):
-        """Blur a video file into dst, like blur_video.py.
-
-        Keeps the codec, sound and subtitles when ffmpeg is on PATH (video only
-        without it). Returns a dict with frame and face counts; raises
-        RuntimeError if the video could not be processed.
-
-        detect_every, hold -- yunet: detect every N frames, keep a lost face
-                              blurred for N frames
-        analysis_fps       -- raccoon: full face scans per second of video
-        """
-        import blur_video  # imported here: it is only needed for video files
-        src, dst = Path(src), Path(dst)
-        if src.resolve() == dst.resolve():
-            raise ValueError("dst must not be src (the original would be overwritten)")
-        opts = SimpleNamespace(model=self.model, method=self.method, strength=self.strength,
-                               pad=self.pad, shape=self.shape, min_size=self.min_size,
-                               cpu=not self.gpu, detect_every=detect_every, hold=hold,
-                               analysis_fps=analysis_fps)
-        row = blur_video.process_video(src, dst, opts, shutil.which("ffmpeg") is not None,
-                                       src.name)
-        if row["status"] != "ok":
-            raise RuntimeError(f"could not blur {src}: {row['note']}")
-        return row
-
     # ---------------------------------------------------------------- live
 
-    def stream(self, fps, delay=0.5, detect_every=1, hold=1.0, smooth=2, extend=False,
-               low_score=0.1):
+    def stream(self, fps, detect_every=1, hold=0.3, low_score=0.3, delay=0.5):
         """A StreamBlurrer for live frames; see that class."""
-        return StreamBlurrer(self, fps, delay, detect_every, hold, smooth, extend, low_score)
+        return StreamBlurrer(self, fps, detect_every, hold, low_score, delay)
 
 
 class StreamBlurrer:
-    """Blur a live sequence of frames (webcam, RTSP, ...) like blur_stream.py.
+    """Blur a live sequence of frames (webcam, RTSP, video).
 
-    Faces are tracked with optical flow between detector runs; low-score
-    detections (low_score .. the normal threshold, 0 = off) keep an existing
-    face tracked, as in ByteTrack. Frames come out
-    `delay` seconds after they go in, so the frames between two detections of
-    a face can be filled from both ends. A face is blurred from its first to
-    its last detection only (frame-accurate); extend=True also blurs it before
-    its first detection (within `delay`) and up to `hold` seconds after its
-    last one, which is safer for privacy. If analysing a frame fails, that
-    frame is blurred whole.
+    Faces are tracked with ByteTrack (Kalman filter + two-stage matching:
+    low-score detections, low_score .. the normal threshold, keep an existing
+    face tracked; 0 = off). Between detector runs (detect_every) and for a
+    face the detector just lost, the box follows optical flow; a lost face
+    stays blurred for `hold` seconds (0 = only faces the detector found).
 
-    push(frame) returns the frames that are ready (often none at first, then
-    one per frame); flush() returns the rest at the end. Frames are blurred in
-    place and returned.
+    push(frame) returns a FrameResult: the original frame, the blurred frame
+    and the face boxes. The input frame is not changed.
+
+    delay (seconds, default 0.5; 0 = none) holds frames so that later
+    detections fix earlier frames: a new face is followed back through the
+    frames the detector missed it in, and a face found again is filled in the
+    frames between. push() then returns the FrameResult of the frame `delay`
+    seconds earlier (None while the buffer fills); flush() returns the rest
+    at the end of the stream. About halves the faces left unblurred.
     """
 
-    def __init__(self, blurrer, fps, delay=0.5, detect_every=1, hold=1.0, smooth=2,
-                 extend=False, low_score=0.1):
-        from blur_stream import Analyzer  # imported here: only needed for streams
-        if fps <= 0 or delay < 0 or detect_every < 1 or hold <= 0:
-            raise ValueError("need fps > 0, delay >= 0, detect_every >= 1, hold > 0")
+    def __init__(self, blurrer, fps, detect_every=1, hold=0.3, low_score=0.3, delay=0.5):
+        from tracker import Analyzer, Lookahead  # imported here: only needed for streams
+        if fps <= 0 or detect_every < 1 or hold < 0 or delay < 0:
+            raise ValueError("need fps > 0, detect_every >= 1, hold >= 0, delay >= 0")
         self.fb = blurrer
-        opts = SimpleNamespace(delay=delay, hold=hold, detect_every=detect_every,
-                               min_size=blurrer.min_size, smooth=smooth if delay else 0,
-                               extend=extend, low_score=low_score)
+        opts = SimpleNamespace(hold=hold, detect_every=detect_every,
+                               min_size=blurrer.min_size, low_score=low_score)
         self.analyzer = Analyzer(opts, fps)
-        self.i = 0
+        frames = round(delay * fps)
+        self.lookahead = Lookahead(self.analyzer, frames) if frames > 0 else None
 
     def push(self, frame):
-        """Add the next frame. Returns a list of blurred frames ready to show."""
-        out = self._finish(self.analyzer.push(self.i, frame, time.time()))
-        self.i += 1
-        return out
+        """Analyse the next frame. Returns its FrameResult; with a delay, the
+        FrameResult of the frame `delay` seconds earlier (None at first)."""
+        if self.lookahead is None:
+            return self._result(frame, self.analyzer.push(frame))
+        out = self.lookahead.push(frame)
+        return self._result(*out[0]) if out else None
 
     def flush(self):
-        """Return the frames still waiting in the delay buffer, blurred."""
-        return self._finish(self.analyzer.flush())
+        """With a delay: the FrameResults still held, at the end of the stream."""
+        return [self._result(*e) for e in self.lookahead.flush()] if self.lookahead else []
 
-    def _finish(self, items):
-        frames = []
-        for e, boxes in items:
-            frame = e["frame"]
-            e["gray"] = None
-            if e["fail"]:
-                H, W = frame.shape[:2]
-                blur_region(frame, (0, 0, W, H), "pixelate", 3, 0, "rect")
-            frames.append(self.fb.blur_boxes(frame, boxes, inplace=True))
-        return frames
+    def _result(self, frame, faces):
+        return FrameResult(frame, faces or [], faces is None, self.fb)
+
+
+class FrameResult:
+    """One analysed frame.
+
+    original -- the input frame, unchanged
+    boxes    -- the faces to blur, as (x, y, w, h) in pixels
+    scores   -- detector confidence of each face (at its last detection; a
+                face followed by tracking keeps the score it was found with)
+    failed   -- True if analysing the frame failed (then `blurred` is the
+                whole frame pixelated, so nothing is shown unblurred)
+    blurred  -- a blurred copy of the frame (made on first use)
+    """
+
+    def __init__(self, frame, faces, failed, blurrer):
+        self.original, self.failed = frame, failed
+        self.boxes = [f[:4] for f in faces]
+        self.scores = [f[4] for f in faces]
+        self._fb, self._blurred = blurrer, None
+
+    @property
+    def blurred(self):
+        if self._blurred is None:
+            out = self.original.copy()
+            if self.failed:  # fail closed
+                H, W = out.shape[:2]
+                blur_region(out, (0, 0, W, H), "pixelate", 3, 0, "rect")
+            self._blurred = self._fb.blur_boxes(out, self.boxes, inplace=True)
+        return self._blurred

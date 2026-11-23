@@ -1,15 +1,17 @@
 """Face detection on a Qualcomm Hexagon NPU (onnxruntime QNN EP, HTP backend).
 
-Two detectors:
+Three detectors:
   * QnnFaceDetLite: Qualcomm's Lightweight-Face-Detection (face_det_lite, BSD-3,
     float model from Qualcomm AI Hub, models/face_det_lite/). The default on
     Qualcomm hardware.
+  * QnnYolo11Face: YOLO11n-face at 640x384 or 1280x736 (models/yolo11n_face/,
+    AGPL-3.0 weights). Finds far more small faces than face_det_lite.
   * QnnYuNet: YuNet with fixed input sizes, quantized by tools/make_yunet_qnn.py.
 
 The Hexagon HTP runs graphs with fixed input shapes, so the frame is
 letterboxed (scaled to fit, zero-padded at the bottom/right) into one of the
 fixed-size models built by tools/make_yunet_qnn.py, and the boxes are scaled
-back to the frame. Decode and NMS are the same as blur_faces.OrtYuNet
+back to the frame. Decode and NMS are the same as detector.OrtYuNet
 (OpenCV FaceDetectorYN).
 
     from hexagon import QnnYuNet
@@ -29,7 +31,7 @@ import numpy as np
 
 MODELS_DIR = Path(__file__).resolve().parent / "models"
 YUNET_DYNAMIC = MODELS_DIR / "face_detection_yunet_2023mar_dynamic.onnx"
-SCORE_THRESHOLD, NMS_THRESHOLD, TOP_K = 0.7, 0.3, 5000  # same as blur_faces
+SCORE_THRESHOLD, NMS_THRESHOLD, TOP_K = 0.7, 0.3, 5000  # same as detector
 STRIDES = (8, 16, 32)
 
 # Fixed input sizes (width, height) built by tools/make_yunet_qnn.py. All are
@@ -66,7 +68,7 @@ def letterbox(img, size):
 
 def decode(out, size, thresh=SCORE_THRESHOLD):
     """YuNet outputs -> (boxes Nx4 [x, y, w, h] in model pixels, scores), after NMS.
-    Same maths as blur_faces.OrtYuNet / OpenCV FaceDetectorYN."""
+    Same maths as detector.OrtYuNet / OpenCV FaceDetectorYN."""
     W, _ = size
     boxes, scores = [], []
     for s in STRIDES:
@@ -276,6 +278,75 @@ class QnnFaceDetLite:
         for (x0, y0, x1, y1), sc in zip(boxes / scale, scores):
             x0, y0 = max(int(x0), 0), max(int(y0), 0)
             x1, y1 = min(int(round(x1)), W), min(int(round(y1)), H)
+            if x1 > x0 and y1 > y0 and min(x1 - x0, y1 - y0) >= min_size:
+                faces.append((x0, y0, x1 - x0, y1 - y0, float(sc)))
+        return faces
+
+
+# --------------------------------------------------------------------------- YOLO11n-face
+
+YOLO_DIR = MODELS_DIR / "yolo11n_face"
+YOLO_SIZES = {"yolo11n_640": (640, 384), "yolo11n_1280": (1280, 736)}  # fixed model input (w, h)
+YOLO_THRESHOLD = 0.3   # no false faces seen at 0.3 on the test clips
+YOLO_NMS = 0.45
+
+
+class QnnYolo11Face:
+    """YOLO11n-face (zjykzj/YOLO11Face, YOLO11n-pose trained on WIDER FACE;
+    AGPL-3.0 weights, see models/yolo11n_face/README.md) through onnxruntime.
+
+    Float model; on the HTP it runs in fp16. The frame is letterboxed (RGB,
+    pad 114, / 255) into the fixed input; output (1, 20, N) is cx, cy, w, h,
+    score and 5 keypoints, decoded with NMS.
+
+    name -- "yolo11n_640" (640x384) or "yolo11n_1280" (1280x736)
+    Other arguments as QnnFaceDetLite.
+    """
+
+    def __init__(self, name="yolo11n_640", providers=None, cache_dir=None, strict=False, log_level=3):
+        self.size = YOLO_SIZES[name]
+        path = YOLO_DIR / f"yolo11n_face_{self.size[0]}x{self.size[1]}.onnx"
+        if not path.exists():
+            raise FileNotFoundError(f"{path} missing")
+        if providers is None:
+            providers = [("QNNExecutionProvider", qnn_provider_options("fp32")), "CPUExecutionProvider"]
+        self.sess = open_session(path, providers, cache_dir, strict, log_level)
+        self.providers = self.sess.get_providers()
+        self.provider = self.providers[0]
+        self.on_npu = self.provider == "QNNExecutionProvider"
+        self.input = self.sess.get_inputs()[0].name
+        self.threshold = YOLO_THRESHOLD
+        self.name = f"YOLO11n-face {self.size[0]}x{self.size[1]} (float)"
+
+    def preprocess(self, img):
+        """BGR uint8 frame -> (1x3xHxW float32 RGB blob in [0, 1], scale)."""
+        W, H = self.size
+        h, w = img.shape[:2]
+        scale = min(W / w, H / h)
+        nw, nh = min(W, round(w * scale)), min(H, round(h * scale))
+        if (nw, nh) != (w, h):
+            img = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_LINEAR)
+        pad = np.full((H, W, 3), 114, np.uint8)
+        pad[:nh, :nw] = img
+        return pad[:, :, ::-1].transpose(2, 0, 1)[None].astype(np.float32) / 255.0, scale
+
+    def detect(self, img, min_size=0, thresh=YOLO_THRESHOLD):
+        """(x, y, w, h, score) face boxes in `img` pixels with score >= thresh."""
+        blob, scale = self.preprocess(img)
+        out = self.sess.run(None, {self.input: blob})[0][0]   # (20, N)
+        keep = out[4] >= thresh
+        if not keep.any():
+            return []
+        cx, cy, bw, bh = out[:4, keep] / scale
+        scores = out[4, keep]
+        boxes = np.stack([cx - bw / 2, cy - bh / 2, bw, bh], 1)
+        idx = np.asarray(cv2.dnn.NMSBoxes(boxes.tolist(), scores.tolist(), thresh, YOLO_NMS),
+                         int).reshape(-1)
+        H, W = img.shape[:2]
+        faces = []
+        for (x, y, w, h), sc in zip(boxes[idx], scores[idx]):
+            x0, y0 = max(int(x), 0), max(int(y), 0)
+            x1, y1 = min(int(round(x + w)), W), min(int(round(y + h)), H)
             if x1 > x0 and y1 > y0 and min(x1 - x0, y1 - y0) >= min_size:
                 faces.append((x0, y0, x1 - x0, y1 - y0, float(sc)))
         return faces

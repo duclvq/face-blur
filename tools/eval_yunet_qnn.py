@@ -26,7 +26,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
-import blur_faces  # noqa: E402
+import detector  # noqa: E402
 from hexagon import PRECISIONS, SIZES, QnnYuNet, model_path  # noqa: E402
 from make_yunet_qnn import CALIB_EVERY, IMAGE_EXTS, STREET, street_frames  # noqa: E402
 
@@ -89,7 +89,7 @@ class Stats:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", type=Path, default=STREET)
-    ap.add_argument("--thresh", type=float, default=blur_faces.SCORE_THRESHOLD)
+    ap.add_argument("--thresh", type=float, default=detector.SCORE_THRESHOLD)
     ap.add_argument("--sizes", nargs="+", default=[f"{w}x{h}" for w, h in SIZES])
     ap.add_argument("--precisions", nargs="+", default=list(PRECISIONS))
     ap.add_argument("--qnn", action="store_true", help="run the models on the QNN EP")
@@ -103,7 +103,7 @@ def main():
     print(f"images: {len(sets['images'])}, video frames: {len(sets['video'])} "
           f"({sets['video'][0].shape[1]}x{sets['video'][0].shape[0]}), threshold {o.thresh}")
 
-    ref_det = blur_faces.OrtYuNet(["CPUExecutionProvider"])
+    ref_det = detector.OrtYuNet(["CPUExecutionProvider"])
     ref_det.detect(sets["video"][0], 0, o.thresh)
     refs, ref_ms = {}, {}
     for name, imgs in sets.items():
