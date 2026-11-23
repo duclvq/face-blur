@@ -73,8 +73,6 @@ class SceneCut:
 REID_SECONDS = 1.0  # ByteTrack keeps a lost track this long, to give it its old id back
 BACKFILL_SCORE = 0.1  # detections kept down to this score, to follow a new face back
 BACKFILL_IOU = 0.3    # overlap a box in an earlier frame needs to be the same face
-TRACK_BYTES = 1600  # memory of one ByteTrack track with its Kalman state (tracemalloc)
-FACE_BYTES = 500    # memory of one Face
 
 
 class Face:
@@ -97,24 +95,10 @@ class Analyzer:
         self.i = 0
         self.cut_at = -1         # frame of the last scene cut
         self.dets = None         # detections of the last frame, see _analyse
-        self.faces = {}          # ByteTrack track_id -> Face
+        self.faces = {}          # ByteTrack track_id -> Face, the faces found in the last frame
         self.tracker = self._new_tracker()
-        self.max_state = getattr(opts, "max_state_mb", 100) * 1e6
-        self.reset_requested = False
-        self.stats = dict(detections=0, low_matches=0, cuts=0, resets=0, failed=0, frames=0,
+        self.stats = dict(detections=0, low_matches=0, cuts=0, failed=0, frames=0,
                           t_detect=0.0, t_track=0.0)
-
-    def reset(self):
-        """Forget every tracked face; the next frame is analysed from scratch,
-        detector included. Safe to call from another thread: push() applies it."""
-        self.reset_requested = True
-
-    @property
-    def state_bytes(self):
-        """Memory held by the tracking state (estimate)."""
-        t = self.tracker
-        tracks = len(t.tracked_stracks) + len(t.lost_stracks) + len(t.removed_stracks)
-        return tracks * TRACK_BYTES + len(self.faces) * FACE_BYTES
 
     def _new_tracker(self):
         hi = face_threshold()
@@ -143,15 +127,9 @@ class Analyzer:
         o = self.o
         H, W = frame.shape[:2]
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        cut = self.cut(gray)
-        reset = self.reset_requested or self.state_bytes > self.max_state
-        if cut:
+        if self.cut(gray):
             self.cut_at = i
             self.stats["cuts"] += 1
-        elif reset:
-            self.stats["resets"] += 1
-        if cut or reset:
-            self.reset_requested = False
             self.faces = {}  # never carry a box across a cut
             self.tracker = self._new_tracker()
 
@@ -172,26 +150,20 @@ class Analyzer:
         hi = self.tracker.args.track_thresh
         fid = self.tracker.frame_id
         faces = {}
-        for st in self.tracker.tracked_stracks + self.tracker.lost_stracks:
-            f = self.faces.get(st.track_id)
+        for st in self.tracker.tracked_stracks:
             if st.state == TrackState.Tracked and st.frame_id == fid:  # found in this frame
-                if f is not None and st.score < hi:
+                if st.track_id in self.faces and st.score < hi:
                     self.stats["low_matches"] += 1
-                f = Face(st.tlbr, i, st.score) if f is None else f
-                f.box, f.last_seen, f.score = st.tlbr, i, float(st.score)
-            if f is not None:
-                faces[st.track_id] = f
-        self.faces = faces  # tracks ByteTrack removed are dropped
+                faces[st.track_id] = Face(st.tlbr, i, float(st.score))
+        self.faces = faces  # a lost face lives on in ByteTrack only, for re-identification
         t = t1
 
         out = []
         for k, f in self.faces.items():
-            # Found in this frame (lost faces are kept for ByteTrack only).
-            if f.last_seen == i:
-                c = clip_box(f.box, W, H)
-                if c[2] - c[0] >= 2 and c[3] - c[1] >= 2:
-                    out.append((int(c[0]), int(c[1]), int(round(c[2] - c[0])), int(round(c[3] - c[1])),
-                                f.score, k))
+            c = clip_box(f.box, W, H)
+            if c[2] - c[0] >= 2 and c[3] - c[1] >= 2:
+                out.append((int(c[0]), int(c[1]), int(round(c[2] - c[0])), int(round(c[3] - c[1])),
+                            f.score, k))
         self.stats["t_track"] += time.perf_counter() - t
         return out
 
@@ -261,6 +233,9 @@ class Lookahead:
             self.i += 1
             if faces is not None:
                 faces = list(faces)
+            if not self.buf:
+                self.seen.clear()  # no frame held to fix (no delay): nothing to remember
+            elif faces is not None:
                 for f in faces:
                     tid, box = f[5], np.array([f[0], f[1], f[0] + f[2], f[1] + f[3]], float)
                     last = self.seen.get(tid)
@@ -270,9 +245,8 @@ class Lookahead:
                         self._gap(f, last, i, box)
                     self.seen[tid] = (i, box)
             self.buf.append([i, frame, faces, dets])
-            if i % 100 == 0:  # forget faces last seen before the buffer
-                first = self.buf[0][0]
-                self.seen = {k: v for k, v in self.seen.items() if v[0] >= first - 1}
+            first = self.buf[0][0]  # a face last seen before the held frames cannot fix them
+            self.seen = {k: v for k, v in self.seen.items() if v[0] >= first - 1}
 
     def pop(self):
         """The oldest (frame, faces), or None if empty."""

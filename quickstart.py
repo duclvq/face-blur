@@ -42,6 +42,9 @@ def main():
                     help="confidence a detection needs to count as a face, 0..1 (default: the "
                          "model's own, yolo11n 0.3, face_det_lite 0.55, yunet 0.7). Lower finds more faces "
                          "and more false ones")
+    ap.add_argument("--max-buffered", type=int, default=None, metavar="N",
+                    help="most frames held (default: --delay plus one second of frames); when the "
+                         "output falls behind and the buffer is full, the oldest frame is dropped")
     ap.add_argument("--low-score", type=float, default=0.3, metavar="S",
                     help="ByteTrack second stage: detections between S and --threshold keep a face "
                          "that is already tracked (default 0.3; 0 = off)")
@@ -71,7 +74,7 @@ def main():
                      method=args.method, strength=args.strength, shape=args.shape, pad=args.pad,
                      mask=not args.no_mask)
     live = fb.stream(fps=video.fps, delay=args.delay,
-                     low_score=args.low_score)
+                     low_score=args.low_score, max_buffered=args.max_buffered)
 
     stats = Stats(budget_ms=1000 / video.fps)        # fps, speed and a graph of time and faces, drawn on the frame
     analysis = [0.0]                                  # seconds the last put() took
@@ -84,7 +87,7 @@ def main():
         out = res.original.copy() if res.blurred is None else res.blurred.copy()
         if args.show_scores:
             draw_faces(out, res.boxes, res.scores)
-        stats.draw(out, stats.start() - analysis[0], faces=len(res.boxes), dropped=video.dropped)
+        stats.draw(out, stats.start() - analysis[0], faces=len(res.boxes), dropped=video.dropped + live.dropped)
         if sink:
             sink.write(out)
             return True

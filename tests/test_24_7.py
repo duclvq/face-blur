@@ -192,62 +192,52 @@ def test_frame_time_after_a_week_without_scene_cut(scripted):
     assert aged < fresh + 2.0, f"a week-old stream costs {aged - fresh:.1f} ms more per frame"
 
 
-def test_reset_forgets_faces_keeps_frames(scripted):
-    """live.reset() from the output thread: no frame lost, the faces found
-    after it get new track ids, and the faces on screen stay blurred."""
-    crowd = scripted(spawn_per_s=3.0)
-    live = FaceBlurrer(mask=False).stream(fps=FPS, delay=6)
-    tag, order, k = {}, [], 0
-    for step in range(600):
+def test_buffer_bounded_when_output_stalls(scripted):
+    """The output side stops for 1000 frames. The stream never holds more than
+    its capacity (delay + one second); the oldest frames are dropped and
+    counted, and the frames it returns afterwards are the newest, in order."""
+    crowd = scripted(W=320, H=180)
+    delay = 12
+    live = FaceBlurrer(mask=False).stream(fps=FPS, delay=delay)
+    tag, held = {}, 0
+    for k in range(1000):
         f = crowd.next()
-        tag[id(f)] = step
-        if step == 301:
-            before = set(live.analyzer.faces)
-            live.reset()
+        tag[id(f)] = k
         live.put(f)
-        if step == 301:
-            after = set(live.analyzer.faces)
-            visible = sum(1 for p in crowd.people if p["x"] > 0 and p["x"] + p["s"] < crowd.W)
-        order += [tag.pop(id(r.original)) for r in iter(live.get, None)]
-    order += [tag.pop(id(r.original)) for r in live.flush()]
-    assert order == list(range(600))
-    assert live.resets == 1
-    assert before and after and not (before & after), "track ids carried across reset()"
-    assert len(after) >= 0.5 * visible, "faces left unblurred right after reset()"
-
-
-def test_state_limit_resets_the_stream(scripted):
-    """With a tiny max_state_mb the stream resets itself whenever the tracking
-    state passes it, and never holds more than the limit plus one frame of
-    new faces (the check runs before each frame's update)."""
-    crowd = scripted(spawn_per_s=3.0)
-    live = FaceBlurrer(mask=False).stream(fps=FPS, max_state_mb=0.02)
-    peak, max_faces = 0.0, 0
-    for _ in range(3000):
-        live.put(crowd.next())
-        live.get()
-        peak = max(peak, live.state_mb)
-        max_faces = max(max_faces, len(crowd.people))
-    print(f"\n  {live.resets} automatic resets, peak state {peak * 1000:.0f} KB")
-    assert live.resets > 0
-    one_frame = max_faces * (tracker.TRACK_BYTES + tracker.FACE_BYTES) / 1e6
-    assert peak < 0.02 + one_frame, f"peak {peak * 1000:.0f} KB, limit 20 KB + one frame {one_frame * 1000:.0f} KB"
+        held = max(held, live.buffered)
+    assert held == live.capacity == delay + FPS
+    assert live.dropped == 1000 - live.capacity
+    order = [tag[id(r.original)] for r in live.flush()]
+    assert order == list(range(1000 - live.capacity, 1000))
     with pytest.raises(ValueError):
-        FaceBlurrer(mask=False).stream(fps=FPS, max_state_mb=0)
+        FaceBlurrer(mask=False).stream(fps=FPS, max_buffered=0)
 
 
-def test_default_state_stays_small(scripted):
-    """At the default limit a busy camera never needs a reset: the tracking
-    state stays far below 100 MB (removed tracks are not kept)."""
-    crowd = scripted(spawn_per_s=3.0)
-    live = FaceBlurrer(mask=False).stream(fps=FPS)
-    peak = 0.0
-    for _ in range(6000):
-        live.put(crowd.next())
-        live.get()
-        peak = max(peak, live.state_mb)
-    print(f"\n  peak tracking state {peak * 1000:.0f} KB over 6000 frames, {crowd.spawned} people")
-    assert live.resets == 0 and peak < 1.0
+def test_tracking_keeps_only_what_it_needs(scripted):
+    """A busy camera for 6000 frames: tracking holds the faces of the current
+    frame and ByteTrack the faces of the last second; the delay buffer
+    remembers only faces in its held frames, and nothing without a delay."""
+    for delay in (0, 12):
+        crowd = scripted(spawn_per_s=3.0)
+        live = FaceBlurrer(mask=False).stream(fps=FPS, delay=delay)
+        bt_peak = seen_peak = faces_peak = on_screen = 0
+        for _ in range(6000):
+            live.put(crowd.next())
+            while live.get() is not None:
+                pass
+            bt = live.analyzer.tracker
+            bt_peak = max(bt_peak, len(bt.tracked_stracks) + len(bt.lost_stracks) + len(bt.removed_stracks))
+            seen_peak = max(seen_peak, len(live.buffer.seen))
+            faces_peak = max(faces_peak, len(live.analyzer.faces))
+            on_screen = max(on_screen, len(crowd.people))
+        print(f"\n  delay={delay}: up to {on_screen} people on screen; peak ByteTrack tracks {bt_peak}, "
+              f"faces {faces_peak}, delay-buffer ids {seen_peak} ({crowd.spawned} people in all)")
+        assert faces_peak <= on_screen
+        assert bt_peak <= 3 * on_screen, "ByteTrack keeps tracks longer than needed"
+        if delay == 0:
+            assert seen_peak == 0, "the delay buffer remembers faces without a delay"
+        else:
+            assert seen_peak <= 3 * on_screen, "the delay buffer remembers faces outside its frames"
 
 
 # --------------------------------------------------------------------------- real-time soak (opt-in)
