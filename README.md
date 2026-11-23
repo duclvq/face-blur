@@ -7,12 +7,13 @@ The four built-in models on the same night street, with tracking, the detector o
 ![yolo11n_640, yolo11n_1280, face_det_lite and yunet on the same street video](examples/video/models_compare.gif)
 
 A crowded subway train, original on top, live stream below ([12 s clip as MP4](examples/video/subway_before_after.mp4)).
-Setup: NVIDIA RTX 5060 Ti (`onnxruntime-gpu`), 1080p at 60 fps, every frame analysed; the overlay graphs the time per frame (dashed line: the 16.7 ms frame budget) and the face count. Config:
+Setup: NVIDIA RTX 5060 Ti (`onnxruntime-gpu`), 1080p at 60 fps, no frame dropped; the overlay graphs the time per frame (dashed line: the 16.7 ms frame budget) and the face count. Config:
 
 ```python
 fb = FaceBlurrer(model="yolo11n_1280", device="gpu")
-live = fb.stream(fps=60, delay=30, low_score=0.2)   # delay 30 frames = 0.5 s at 60 fps
-# command line: python quickstart.py --input subway.mp4 --model yolo11n_1280 --device gpu --delay 30 --low-score 0.2
+live = fb.stream(fps=60, delay=30, low_score=0.2,   # delay 30 frames = 0.5 s at 60 fps
+                 detect_every=2)                     # detector on every 2nd frame, tracking in between
+# command line: python quickstart.py --input subway.mp4 --model yolo11n_1280 --device gpu --delay 30 --low-score 0.2 --detect-every 2
 ```
 
 ![a subway train before and after face-blur, with the time and face count graph](examples/video/subway_before_after.gif)
