@@ -6,14 +6,14 @@
 Decoding and encoding (hardware when available) are in videoio.py; this file
 only shows the analysis step.
 
-    python quickstart.py --input rtsp://camera/stream                                # view in a window
+    python quickstart.py --input rtsp://camera/stream                                # view in a window (no delay)
     python quickstart.py --input video.mp4                                           # a video file
     python quickstart.py --input video.mp4 --model yolo11n_1280                      # small faces, slower
     python quickstart.py --input video.mp4 --model face_det_lite                     # Qualcomm's detector
     python quickstart.py --input video.mp4 --tiles 2                                 # small faces too
     python quickstart.py --input video.mp4 --tiles 2 --detect-every 3                # detect every 3rd frame
     python quickstart.py --input video.mp4 --threshold 0.6                           # fewer false faces
-    python quickstart.py --input video.mp4 --delay 0                                 # no delay (less accurate)
+    python quickstart.py --input video.mp4 --delay 0.5                               # 0.5 s later, about half the misses
     python quickstart.py --input video.mp4 --method pixelate --shape rect            # pixel blocks over the whole box
     python quickstart.py --input rtsp://camera/stream --output rtsp://server/blurred # re-stream
     python quickstart.py                                                             # the sample clip
@@ -34,6 +34,12 @@ def main():
     ap.add_argument("--input", default=SAMPLE, help="rtsp:// URL or video file (default: the sample clip)")
     ap.add_argument("--output", help="rtsp://, srt://, udp:// URL or .mp4 file (default: show in a window)")
     ap.add_argument("--model", choices=MODELS, default=DEFAULT_MODEL, help=f"face detector (default: {DEFAULT_MODEL})")
+    ap.add_argument("--detect-every", type=int, default=1, metavar="N",
+                    help="run the detector every N frames; tracking (ByteTrack + optical flow) "
+                         "moves the faces in between (default 1 = every frame)")
+    ap.add_argument("--delay", type=float, default=0, metavar="SEC",
+                    help="hold the output SEC seconds so later detections fix earlier frames: "
+                         "e.g. 0.5: about half as many faces left unblurred (default 0 = no delay)")
     ap.add_argument("--threshold", type=float, default=None, metavar="T",
                     help="confidence a detection needs to count as a face, 0..1 (default: the "
                          "model's own, yolo11n 0.3, face_det_lite 0.55, yunet 0.7). Lower finds more faces "
@@ -50,12 +56,6 @@ def main():
     ap.add_argument("--pad", type=float, default=0.15, metavar="F",
                     help="margin around each face, as a fraction of its size, 0..1 (default 0.15)")
     ap.add_argument("--show-scores", action="store_true", help="draw each face box with its confidence")
-    ap.add_argument("--detect-every", type=int, default=1, metavar="N",
-                    help="run the detector every N frames; tracking (ByteTrack + optical flow) "
-                         "moves the faces in between (default 1 = every frame)")
-    ap.add_argument("--delay", type=float, default=0.5, metavar="SEC",
-                    help="hold the output SEC seconds so later detections fix earlier frames: "
-                         "about half as many faces left unblurred (default 0.5; 0 = no delay)")
     ap.add_argument("--tiles", type=int, default=1, metavar="N",
                     help="also detect on an N x N grid of tiles, for small faces (default 1 = off; "
                          "costs 1 + N*N detector runs per frame)")

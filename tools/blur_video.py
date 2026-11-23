@@ -79,7 +79,7 @@ def main():
             ok, frame = cap.read()
             if not ok:
                 break
-            res = live.push(frame)          # the frame 0.5 s earlier (None at first)
+            res = live.push(frame)          # None at first if a delay is set
             if res is not None:
                 out.write(res.blurred)
                 n += 1

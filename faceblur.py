@@ -8,12 +8,12 @@
 
     live = fb.stream(fps=30)                   # live frames (RTSP, webcam, ...)
     for frame in frames:
-        res = live.push(frame)                 # the frame 0.5 s earlier (delay=0.5)
-        if res is None:                        # buffer still filling
+        res = live.push(frame)                 # no delay by default
+        if res is None:                        # only with delay=: buffer still filling
             continue
         res.original, res.blurred, res.boxes   # input, blurred copy, [(x, y, w, h)]
         res.scores                             # confidence of each face
-    rest = live.flush()                        # the last 0.5 s, at the end
+    rest = live.flush()                        # with delay=: the frames still held, at the end
 
 See quickstart.py for a full live pipeline (RTSP, hardware decode, this API,
 hardware encode, live view). The library itself does not decode or encode video.
@@ -112,7 +112,7 @@ class FaceBlurrer:
 
     # ---------------------------------------------------------------- live
 
-    def stream(self, fps, detect_every=1, hold=0.3, low_score=0.3, delay=0.5):
+    def stream(self, fps, detect_every=1, hold=0.3, low_score=0.3, delay=0):
         """A StreamBlurrer for live frames; see that class."""
         return StreamBlurrer(self, fps, detect_every, hold, low_score, delay)
 
@@ -129,7 +129,7 @@ class StreamBlurrer:
     push(frame) returns a FrameResult: the original frame, the blurred frame
     and the face boxes. The input frame is not changed.
 
-    delay (seconds, default 0.5; 0 = none) holds frames so that later
+    delay (seconds, default 0 = none; e.g. 0.5) holds frames so that later
     detections fix earlier frames: a new face is followed back through the
     frames the detector missed it in, and a face found again is filled in the
     frames between. push() then returns the FrameResult of the frame `delay`
@@ -137,7 +137,7 @@ class StreamBlurrer:
     at the end of the stream. About halves the faces left unblurred.
     """
 
-    def __init__(self, blurrer, fps, detect_every=1, hold=0.3, low_score=0.3, delay=0.5):
+    def __init__(self, blurrer, fps, detect_every=1, hold=0.3, low_score=0.3, delay=0):
         from tracker import Analyzer, Lookahead  # imported here: only needed for streams
         if fps <= 0 or detect_every < 1 or hold < 0 or delay < 0:
             raise ValueError("need fps > 0, detect_every >= 1, hold >= 0, delay >= 0")
