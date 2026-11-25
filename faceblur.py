@@ -55,6 +55,8 @@ class FaceBlurrer:
                 needs onnxruntime-gpu) or "npu" (Qualcomm, needs onnxruntime-qnn).
                 A device that is missing raises RuntimeError. self.backend
                 names the provider in use
+    precision -- which build of the model: "fp32" (default) or "a16w8"
+                (quantized, for the Qualcomm NPU; also run on cpu/gpu). Not for yunet
     mask     -- True (default): stream results carry a blurred copy.
                 False: no blurring at all; res.blurred is None and you mask
                 the faces yourself from res.boxes (method, strength, pad and
@@ -63,7 +65,8 @@ class FaceBlurrer:
     """
 
     def __init__(self, model=DEFAULT_MODEL, method="gaussian", strength=3, pad=0.15,
-                 shape="oval", min_size=None, device="cpu", threshold=None, mask=True):
+                 shape="oval", min_size=None, device="cpu", threshold=None, mask=True,
+                 precision=None):
         if model not in MODELS:
             raise ValueError(f"model must be one of {MODELS}, not {model!r}")
         if method not in ("gaussian", "pixelate"):
@@ -79,7 +82,7 @@ class FaceBlurrer:
         self.min_size = (24 if model == "yunet" else 0) if min_size is None else min_size
 
         try:
-            self.backend = detector.use_model(model, device)
+            self.backend = detector.use_model(model, device, precision)
             detector.use_threshold(threshold)
         except SystemExit as e:  # detector exits when a model cannot start
             raise RuntimeError(str(e)) from None

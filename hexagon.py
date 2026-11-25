@@ -2,10 +2,10 @@
 
 Three detectors:
   * QnnFaceDetLite: Qualcomm's Lightweight-Face-Detection (face_det_lite, BSD-3,
-    float model from Qualcomm AI Hub, models/face_det_lite/). The default on
-    Qualcomm hardware.
+    float and a16w8 builds from Qualcomm AI Hub, models/face_det_lite/).
   * QnnYolo11Face: YOLO11n-face at 640x384 or 1280x736 (models/yolo11n_face/,
-    AGPL-3.0 weights). Finds far more small faces than face_det_lite.
+    AGPL-3.0 weights; float and a16w8 builds). Finds far more small
+    faces than face_det_lite.
   * QnnYuNet: YuNet with fixed input sizes, quantized by tools/make_yunet_qnn.py.
 
 The Hexagon HTP runs graphs with fixed input shapes, so the frame is
@@ -50,6 +50,18 @@ DEFAULT_PRECISION = "a16w8"
 def model_path(size=DEFAULT_SIZE, precision=DEFAULT_PRECISION):
     w, h = size
     return MODELS_DIR / f"face_detection_yunet_2023mar_qnn_{w}x{h}_{precision}.onnx"
+
+
+def build_path(path, precision):
+    """The build of float model `path` for `precision`: fp32 is `path` itself,
+    a8w8 / a16w8 add a suffix (face_det_lite.onnx -> face_det_lite_a16w8.onnx)."""
+    if precision not in PRECISIONS:
+        raise ValueError(f"precision must be one of {PRECISIONS}, not {precision!r}")
+    if precision != "fp32":
+        path = path.with_name(f"{path.stem}_{precision}{path.suffix}")
+    if not path.exists():
+        raise FileNotFoundError(f"{path} missing")
+    return path
 
 
 def letterbox(img, size):
@@ -212,31 +224,32 @@ LITE_GRAY = np.array([0.0721, 0.7154, 0.2125], np.float32) / 255.0
 class QnnFaceDetLite:
     """Qualcomm Lightweight-Face-Detection (face_det_lite) through onnxruntime.
 
-    Float model from Qualcomm AI Hub (v0.67.0, the most accurate precision).
-    On the HTP it runs in fp16 (enable_htp_fp16_precision), as AI Hub runs it.
+    Models from Qualcomm AI Hub (v0.67.0). precision "fp32" (default, the most
+    accurate) runs in fp16 on the HTP (enable_htp_fp16_precision), as AI Hub
+    runs it; "a16w8" is AI Hub's quantized build.
     Pre/post-processing follows qai_hub_models/models/face_det_lite (app.py,
     utils.detect): grayscale in [0, 1], 640x480 input; a CenterNet-style
     heatmap at stride 8 whose 3x3 local maxima are faces; box offsets
     (left, top, right, bottom) in stride units.
 
+    precision -- "fp32" or "a16w8"
     providers -- None: QNN (HTP) then CPU; or e.g. ["CPUExecutionProvider"]
     Other arguments as QnnYuNet.
     """
 
-    def __init__(self, providers=None, cache_dir=None, strict=False, log_level=3):
-        if not LITE_MODEL.exists():
-            raise FileNotFoundError(f"{LITE_MODEL} missing")
+    def __init__(self, precision="fp32", providers=None, cache_dir=None, strict=False, log_level=3):
+        path = build_path(LITE_MODEL, precision)
         if providers is None:
-            providers = [("QNNExecutionProvider", qnn_provider_options("fp32")), "CPUExecutionProvider"]
+            providers = [("QNNExecutionProvider", qnn_provider_options(precision)), "CPUExecutionProvider"]
         self.size = LITE_SIZE
-        self.sess = open_session(LITE_MODEL, providers, cache_dir, strict, log_level)
+        self.sess = open_session(path, providers, cache_dir, strict, log_level)
         self.providers = self.sess.get_providers()
         self.provider = self.providers[0]
         self.on_npu = self.provider == "QNNExecutionProvider"
         self.input = self.sess.get_inputs()[0].name
         self.names = [o.name for o in self.sess.get_outputs()]
         self.threshold = LITE_THRESHOLD
-        self.name = "Lightweight-Face-Detection (face_det_lite, float)"
+        self.name = f"Lightweight-Face-Detection (face_det_lite, {precision})"
 
     def preprocess(self, img):
         """BGR uint8 frame -> (1x1x480x640 float32 blob in [0, 1], scale)."""
@@ -295,28 +308,27 @@ class QnnYolo11Face:
     """YOLO11n-face (zjykzj/YOLO11Face, YOLO11n-pose trained on WIDER FACE;
     AGPL-3.0 weights, see models/yolo11n_face/README.md) through onnxruntime.
 
-    Float model; on the HTP it runs in fp16. The frame is letterboxed (RGB,
-    pad 114, / 255) into the fixed input; output (1, 20, N) is cx, cy, w, h,
-    score and 5 keypoints, decoded with NMS.
+    The frame is letterboxed (RGB, pad 114, / 255) into the fixed input; the
+    output is cx, cy, w, h, score and 5 keypoints per anchor, decoded with NMS.
 
-    name -- "yolo11n_640" (640x384) or "yolo11n_1280" (1280x736)
+    name      -- "yolo11n_640" (640x384) or "yolo11n_1280" (1280x736)
+    precision -- "fp32" (default; fp16 on the HTP) or "a16w8" (AI Hub build)
     Other arguments as QnnFaceDetLite.
     """
 
-    def __init__(self, name="yolo11n_640", providers=None, cache_dir=None, strict=False, log_level=3):
+    def __init__(self, name="yolo11n_640", precision="fp32", providers=None, cache_dir=None,
+                 strict=False, log_level=3):
         self.size = YOLO_SIZES[name]
-        path = YOLO_DIR / f"yolo11n_face_{self.size[0]}x{self.size[1]}.onnx"
-        if not path.exists():
-            raise FileNotFoundError(f"{path} missing")
+        path = build_path(YOLO_DIR / f"yolo11n_face_{self.size[0]}x{self.size[1]}.onnx", precision)
         if providers is None:
-            providers = [("QNNExecutionProvider", qnn_provider_options("fp32")), "CPUExecutionProvider"]
+            providers = [("QNNExecutionProvider", qnn_provider_options(precision)), "CPUExecutionProvider"]
         self.sess = open_session(path, providers, cache_dir, strict, log_level)
         self.providers = self.sess.get_providers()
         self.provider = self.providers[0]
         self.on_npu = self.provider == "QNNExecutionProvider"
         self.input = self.sess.get_inputs()[0].name
         self.threshold = YOLO_THRESHOLD
-        self.name = f"YOLO11n-face {self.size[0]}x{self.size[1]} (float)"
+        self.name = f"YOLO11n-face {self.size[0]}x{self.size[1]} ({precision})"
 
     def preprocess(self, img):
         """BGR uint8 frame -> (1x3xHxW float32 RGB blob in [0, 1], scale)."""

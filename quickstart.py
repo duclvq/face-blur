@@ -49,6 +49,9 @@ def main():
                     help="skip faces smaller than PX pixels (default: 24 for yunet, no limit otherwise)")
     ap.add_argument("--device", choices=["cpu", "gpu", "npu"], default="cpu",
                     help="where the detector runs: cpu (default), gpu (NVIDIA, needs onnxruntime-gpu) or npu (Qualcomm, needs onnxruntime-qnn)")
+    ap.add_argument("--precision", choices=["fp32", "a16w8"], default=None,
+                    help="which build of the model: fp32 (default) or a16w8 (quantized, for the "
+                         "Qualcomm NPU). Not for yunet")
     # how the blur looks
     ap.add_argument("--method", choices=["gaussian", "pixelate"], default="gaussian",
                     help="smooth blur or pixel blocks (default gaussian)")
@@ -67,7 +70,7 @@ def main():
     sink = VideoSink(args.output, video.size, video.fps) if args.output else None
 
     fb = FaceBlurrer(model=args.model, threshold=args.threshold,  # load once, reuse
-                     min_size=args.min_size, device=args.device,
+                     min_size=args.min_size, device=args.device, precision=args.precision,
                      method=args.method, strength=args.strength, shape=args.shape, pad=args.pad,
                      mask=not args.no_mask)
     live = fb.stream(fps=video.fps, delay=args.delay,
