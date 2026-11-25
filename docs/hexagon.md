@@ -34,6 +34,23 @@ Against full-resolution YuNet on the street clip (CPU EP), it matched 85% of
 YuNet's faces at 360p and 79% at 1080p (94% of faces >= 72 px at 1080p):
 small faces are lost by the 640-px input.
 
+## Quantized builds
+
+Qualcomm AI Hub made these a16w8 builds from the float models (quantize jobs
+of 2026-11-23). `python tools/fetch_aihub_models.py` downloads them again;
+the job of each file is in that script.
+
+| File | Format | NPU time per inference |
+|---|---|---|
+| `yolo11n_face/yolo11n_face_640x384_a16w8.onnx` | QDQ ONNX | IQ-9075 3.5 ms, QCS8550 3.3 ms, X Elite 3.2 ms |
+| `yolo11n_face/yolo11n_face_1280x736_a16w8.onnx` | QDQ ONNX | IQ-9075 12.1 ms, QCS8550 11.6 ms, X Elite 12.4 ms |
+| `face_det_lite/face_det_lite_a16w8.onnx` | QDQ ONNX | IQ-9075 2.0 ms, QCS8550 1.8 ms, X Elite 1.9 ms |
+
+- The RB3 Gen 2 runs only 8-bit models on its NPU. The a16w8 models fall back
+  to its CPU there (93 to 750 ms).
+- On the CPU EP, the mean score difference from the float model on faces the
+  float model finds is below 0.01 (`examples/input`).
+
 ## YuNet (quantized, fixed sizes)
 
 ## What is there

@@ -9,6 +9,8 @@ exported to ONNX (opset 17, float32) at two fixed input sizes:
 | `yolo11n_face_640x384.onnx` | 640 x 384 |
 | `yolo11n_face_1280x736.onnx` | 1280 x 736 |
 
+The `_a16w8` files are 16-bit builds of the same models from Qualcomm AI Hub; see [docs/hexagon.md](../../docs/hexagon.md#quantized-builds).
+
 Input: RGB, letterboxed (pad value 114 at the bottom/right), divided by 255, NCHW.
 Output `(1, 20, N)`: cx, cy, w, h, face score, then 5 keypoints x (x, y, visibility).
 
