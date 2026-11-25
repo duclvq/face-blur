@@ -2,9 +2,9 @@
 
 Three detectors:
   * QnnFaceDetLite: Qualcomm's Lightweight-Face-Detection (face_det_lite, BSD-3,
-    float and a16w8 builds from Qualcomm AI Hub, models/face_det_lite/).
+    float, a16w8 and a8w8 builds from Qualcomm AI Hub, models/face_det_lite/).
   * QnnYolo11Face: YOLO11n-face at 640x384 or 1280x736 (models/yolo11n_face/,
-    AGPL-3.0 weights; float and a16w8 builds). Finds far more small
+    AGPL-3.0 weights; float, a16w8 and a8w8 builds). Finds far more small
     faces than face_det_lite.
   * QnnYuNet: YuNet with fixed input sizes, quantized by tools/make_yunet_qnn.py.
 
@@ -54,7 +54,7 @@ def model_path(size=DEFAULT_SIZE, precision=DEFAULT_PRECISION):
 
 def build_path(path, precision):
     """The build of float model `path` for `precision`: fp32 is `path` itself,
-    a8w8 / a16w8 add a suffix (face_det_lite.onnx -> face_det_lite_a16w8.onnx)."""
+    a8w8 / a16w8 add a suffix (face_det_lite.onnx -> face_det_lite_a8w8.onnx)."""
     if precision not in PRECISIONS:
         raise ValueError(f"precision must be one of {PRECISIONS}, not {precision!r}")
     if precision != "fp32":
@@ -226,13 +226,13 @@ class QnnFaceDetLite:
 
     Models from Qualcomm AI Hub (v0.67.0). precision "fp32" (default, the most
     accurate) runs in fp16 on the HTP (enable_htp_fp16_precision), as AI Hub
-    runs it; "a16w8" is AI Hub's quantized build.
+    runs it; "a16w8" / "a8w8" are AI Hub's quantized builds.
     Pre/post-processing follows qai_hub_models/models/face_det_lite (app.py,
     utils.detect): grayscale in [0, 1], 640x480 input; a CenterNet-style
     heatmap at stride 8 whose 3x3 local maxima are faces; box offsets
     (left, top, right, bottom) in stride units.
 
-    precision -- "fp32" or "a16w8"
+    precision -- "fp32", "a16w8" or "a8w8" (see PRECISIONS)
     providers -- None: QNN (HTP) then CPU; or e.g. ["CPUExecutionProvider"]
     Other arguments as QnnYuNet.
     """
@@ -312,7 +312,7 @@ class QnnYolo11Face:
     output is cx, cy, w, h, score and 5 keypoints per anchor, decoded with NMS.
 
     name      -- "yolo11n_640" (640x384) or "yolo11n_1280" (1280x736)
-    precision -- "fp32" (default; fp16 on the HTP) or "a16w8" (AI Hub build)
+    precision -- "fp32" (default; fp16 on the HTP), "a16w8" or "a8w8" (AI Hub builds)
     Other arguments as QnnFaceDetLite.
     """
 
@@ -327,6 +327,7 @@ class QnnYolo11Face:
         self.provider = self.providers[0]
         self.on_npu = self.provider == "QNNExecutionProvider"
         self.input = self.sess.get_inputs()[0].name
+        self.names = [o.name for o in self.sess.get_outputs()]
         self.threshold = YOLO_THRESHOLD
         self.name = f"YOLO11n-face {self.size[0]}x{self.size[1]} ({precision})"
 
@@ -345,12 +346,16 @@ class QnnYolo11Face:
     def detect(self, img, min_size=0, thresh=YOLO_THRESHOLD):
         """(x, y, w, h, score) face boxes in `img` pixels with score >= thresh."""
         blob, scale = self.preprocess(img)
-        out = self.sess.run(None, {self.input: blob})[0][0]   # (20, N)
-        keep = out[4] >= thresh
+        out = dict(zip(self.names, self.sess.run(None, {self.input: blob})))
+        if "output0" in out:   # (1, 20, N)
+            xywh, score = out["output0"][0, :4], out["output0"][0, 4]
+        else:                  # AI Hub a8w8 build: a_boxes (1, 4, N), b_scores (1, 1, N), c_kpts
+            xywh, score = out["a_boxes"][0], out["b_scores"][0, 0]
+        keep = score >= thresh
         if not keep.any():
             return []
-        cx, cy, bw, bh = out[:4, keep] / scale
-        scores = out[4, keep]
+        cx, cy, bw, bh = xywh[:, keep] / scale
+        scores = score[keep]
         boxes = np.stack([cx - bw / 2, cy - bh / 2, bw, bh], 1)
         idx = np.asarray(cv2.dnn.NMSBoxes(boxes.tolist(), scores.tolist(), thresh, YOLO_NMS),
                          int).reshape(-1)

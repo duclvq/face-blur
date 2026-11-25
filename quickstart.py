@@ -49,9 +49,9 @@ def main():
                     help="skip faces smaller than PX pixels (default: 24 for yunet, no limit otherwise)")
     ap.add_argument("--device", choices=["cpu", "gpu", "npu"], default="cpu",
                     help="where the detector runs: cpu (default), gpu (NVIDIA, needs onnxruntime-gpu) or npu (Qualcomm, needs onnxruntime-qnn)")
-    ap.add_argument("--precision", choices=["fp32", "a16w8"], default=None,
-                    help="which build of the model: fp32 (default) or a16w8 (quantized, for the "
-                         "Qualcomm NPU). Not for yunet")
+    ap.add_argument("--precision", choices=["fp32", "a16w8", "a8w8"], default=None,
+                    help="which build of the model: fp32 (default), a16w8 or a8w8 (quantized, for the "
+                         "Qualcomm NPU; a8w8 also runs on older Hexagons). Not for yunet")
     # how the blur looks
     ap.add_argument("--method", choices=["gaussian", "pixelate"], default="gaussian",
                     help="smooth blur or pixel blocks (default gaussian)")

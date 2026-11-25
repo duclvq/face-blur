@@ -114,7 +114,7 @@ def use_npu(model="face_det_lite", size=None, precision=None, device="npu", cach
     model: "face_det_lite" (default; Qualcomm Lightweight-Face-Detection),
     "yolo11n_640" / "yolo11n_1280" (YOLO11n-face) or "yunet" (fixed-size
     quantized YuNet from tools/make_yunet_qnn.py; size (w, h): hexagon.SIZES).
-    precision: "fp32" or "a16w8" ("a8w8" too for yunet); None is the
+    precision: "fp32", "a16w8" or "a8w8" (hexagon.PRECISIONS); None is the
     model's default, fp32 for face_det_lite and yolo11n, a16w8 for yunet.
     Returns a message naming the provider in use, or a "WARNING: ..." message
     (and no change) when the device is missing or does not start.
@@ -171,7 +171,7 @@ _selected = False  # use_model() called; if not, the first detection loads DEFAU
 def use_model(name, device="cpu", precision=None):
     """Select the face detector and where it runs: "cpu" (default), "gpu"
     (NVIDIA) or "npu" (Qualcomm), and which build: precision "fp32"
-    (default) or "a16w8" (not for yunet). A device that is missing
+    (default), "a16w8" or "a8w8" (not for yunet). A device that is missing
     exits with a message. Returns a message describing the detector."""
     global _npu, _selected
     if name not in MODELS:

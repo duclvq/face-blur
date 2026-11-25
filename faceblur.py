@@ -55,7 +55,7 @@ class FaceBlurrer:
                 needs onnxruntime-gpu) or "npu" (Qualcomm, needs onnxruntime-qnn).
                 A device that is missing raises RuntimeError. self.backend
                 names the provider in use
-    precision -- which build of the model: "fp32" (default) or "a16w8"
+    precision -- which build of the model: "fp32" (default), "a16w8" or "a8w8"
                 (quantized, for the Qualcomm NPU; also run on cpu/gpu). Not for yunet
     mask     -- True (default): stream results carry a blurred copy.
                 False: no blurring at all; res.blurred is None and you mask
