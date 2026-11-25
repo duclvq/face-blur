@@ -1,7 +1,8 @@
 """Face detectors and the blur itself.
 
-use_model(name, device) picks the detector for this process (face_det_lite,
-yolo11n_640, yolo11n_1280, yunet) and where it runs (DEVICES); use_npu() for
+use_model(name, device, precision) picks the detector for this process
+(face_det_lite, yolo11n_640, yolo11n_1280, yunet), where it runs (DEVICES)
+and which build (hexagon.PRECISIONS); use_npu() for
 the quantized YuNet NPU builds; then
 detect_faces_scored(img) returns (x, y, w, h, score) boxes, and
 blur_region(img, box) blurs one box in place.
@@ -110,10 +111,11 @@ def use_npu(model="face_det_lite", size=None, precision=None, device="npu", cach
     "npu" (Qualcomm Hexagon, onnxruntime-qnn), "gpu" (NVIDIA, onnxruntime-gpu)
     or "cpu".
 
-    model: "face_det_lite" (default; Qualcomm Lightweight-Face-Detection,
-    float), "yolo11n_640" / "yolo11n_1280" (YOLO11n-face, float) or "yunet"
-    (fixed-size quantized YuNet from tools/make_yunet_qnn.py;
-    size (w, h) / precision: see hexagon.SIZES / hexagon.PRECISIONS).
+    model: "face_det_lite" (default; Qualcomm Lightweight-Face-Detection),
+    "yolo11n_640" / "yolo11n_1280" (YOLO11n-face) or "yunet" (fixed-size
+    quantized YuNet from tools/make_yunet_qnn.py; size (w, h): hexagon.SIZES).
+    precision: "fp32" or "a16w8" ("a8w8" too for yunet); None is the
+    model's default, fp32 for face_det_lite and yolo11n, a16w8 for yunet.
     Returns a message naming the provider in use, or a "WARNING: ..." message
     (and no change) when the device is missing or does not start.
     """
@@ -137,12 +139,12 @@ def use_npu(model="face_det_lite", size=None, precision=None, device="npu", cach
         providers = ["CPUExecutionProvider"]
     try:
         if model in hexagon.YOLO_SIZES:
-            det = hexagon.QnnYolo11Face(model, providers=providers, cache_dir=cache_dir)
+            det = hexagon.QnnYolo11Face(model, precision or "fp32", providers=providers, cache_dir=cache_dir)
         elif model == "yunet":
             det = hexagon.QnnYuNet(size or hexagon.DEFAULT_SIZE, precision or hexagon.DEFAULT_PRECISION,
                                    providers=providers, cache_dir=cache_dir)
         else:
-            det = hexagon.QnnFaceDetLite(providers=providers, cache_dir=cache_dir)
+            det = hexagon.QnnFaceDetLite(precision or "fp32", providers=providers, cache_dir=cache_dir)
     except Exception as e:  # missing model, a backend library that fails to load, ...
         return f"WARNING: the detector could not start on {device} ({e})"
     if det.provider != PROVIDER[device]:
@@ -166,10 +168,11 @@ DEFAULT_MODEL = "yolo11n_640"
 _selected = False  # use_model() called; if not, the first detection loads DEFAULT_MODEL
 
 
-def use_model(name, device="cpu"):
+def use_model(name, device="cpu", precision=None):
     """Select the face detector and where it runs: "cpu" (default), "gpu"
-    (NVIDIA) or "npu" (Qualcomm). A device that is missing exits with a
-    message. Returns a message describing the detector."""
+    (NVIDIA) or "npu" (Qualcomm), and which build: precision "fp32"
+    (default) or "a16w8" (not for yunet). A device that is missing
+    exits with a message. Returns a message describing the detector."""
     global _npu, _selected
     if name not in MODELS:
         raise ValueError(f"model must be one of {MODELS}, not {name!r}")
@@ -181,8 +184,11 @@ def use_model(name, device="cpu"):
         if device in ("gpu", "npu"):
             sys.exit(f"WARNING: yunet runs on the CPU (OpenCV), not on the {device}; "
                      "for the NPU build see tools/blur_live.py --npu yunet")
+        if precision:
+            sys.exit(f"WARNING: yunet runs the float model in OpenCV, no {precision} build; "
+                     "for the quantized NPU build see tools/blur_live.py --npu yunet")
         return "Face detector: YuNet (OpenCV, CPU)"
-    msg = use_npu(name, device=device)
+    msg = use_npu(name, precision=precision, device=device)
     if msg.startswith("WARNING"):
         sys.exit(msg)
     return msg.replace("Face detection:", "Face detector:")

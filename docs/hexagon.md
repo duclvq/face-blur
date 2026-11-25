@@ -48,6 +48,9 @@ the job of each file is in that script.
 
 - The RB3 Gen 2 runs only 8-bit models on its NPU. The a16w8 models fall back
   to its CPU there (93 to 750 ms).
+- `--precision a16w8` (`FaceBlurrer(precision=)`) picks these ONNX files
+  instead of the float one, for `yolo11n_640`, `yolo11n_1280` and
+  `face_det_lite`. They run on any device.
 - On the CPU EP, the mean score difference from the float model on faces the
   float model finds is below 0.01 (`examples/input`).
 
@@ -96,9 +99,11 @@ python tools/blur_live.py 0 --show --model face_det_lite --device npu   # face_d
 python tools/blur_live.py 0 --show --npu                      # the same
 python tools/blur_live.py 0 --show --npu yunet               # YuNet 960x544 a16w8
 python tools/blur_live.py in.mp4 --show --npu yunet:640x384 --npu-precision a8w8
+python quickstart.py --input in.mp4 --device npu --precision a16w8  # yolo11n_640 a16w8
 ```
 
-From code: `FaceBlurrer(model="face_det_lite", device="npu")`, `detector.use_npu("face_det_lite")`,
+From code: `FaceBlurrer(model="face_det_lite", device="npu")`,
+`FaceBlurrer(device="npu", precision="a16w8")`, `detector.use_npu("face_det_lite")`,
 `detector.use_npu("yunet", (960, 544), "a16w8")`, or `hexagon.QnnFaceDetLite` /
 `hexagon.QnnYuNet`.
 

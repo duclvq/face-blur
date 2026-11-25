@@ -123,8 +123,9 @@ def main():
                          "yunet[:WxH] (quantized YuNet, 640x384, 960x544 (default) or 1280x736). "
                          "--model already runs on the NPU when onnxruntime-qnn is installed. "
                          "See docs/hexagon.md")
-    ap.add_argument("--npu-precision", choices=["a8w8", "a16w8", "fp32"], default="a16w8",
-                    help="--npu yunet only: a16w8 (default), a8w8 (older Hexagon) or fp32 (run as fp16)")
+    ap.add_argument("--npu-precision", choices=["a8w8", "a16w8", "fp32"], default=None,
+                    help="which build of the model: fp32 (run as fp16 on the NPU) or a16w8; "
+                         "a8w8 (older Hexagon) for --npu yunet only. Default: fp32, a16w8 for --npu yunet")
     ap.add_argument("--npu-allow-cpu", action="store_true", help=argparse.SUPPRESS)  # test w/o QNN
     ap.add_argument("--boxes-json", help=argparse.SUPPRESS)  # per-frame boxes, for evaluation
     o = ap.parse_args()
@@ -156,11 +157,13 @@ def main():
         fps = 25.0
     H, W = first.shape[:2]
     live = is_live(o.source)
-    print(use_model(o.model, o.device))
     npu_msg = None
     if npu_model == "yunet":
+        print(use_model("yunet"))  # OpenCV YuNet if the NPU build does not start
         npu_msg = use_npu("yunet", npu_size, o.npu_precision, device=o.device)
-    elif npu_model:  # face_det_lite: use_model loaded it, on the NPU when QNN is there
+    else:
+        print(use_model(o.model, o.device, o.npu_precision))
+    if npu_model == "face_det_lite":  # use_model loaded it, on the NPU when QNN is there
         if not detector._npu.on_npu and not o.npu_allow_cpu:
             npu_msg = "WARNING: onnxruntime has no QNN support (pip install onnxruntime-qnn); using CPU"
     if npu_msg:

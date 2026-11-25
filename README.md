@@ -121,6 +121,7 @@ The same options exist on the command line (`quickstart.py`, `tools/`) and in Py
 | `--min-size PX` | `FaceBlurrer(min_size=)` | `0` (`24` for yunet) | Skip faces smaller than PX pixels | Fewer false small faces, misses distant ones |
 | `--low-score S` | `fb.stream(low_score=)` | `0.1` | ByteTrack second stage: detections between this and the threshold keep a known face tracked | `0` turns it off |
 | `--device cpu\|gpu\|npu` | `FaceBlurrer(device=)` | `cpu` | Where the detector runs: `cpu`, `gpu` (NVIDIA, needs `pip install onnxruntime-gpu[cuda,cudnn]`) or `npu` (Qualcomm, needs `onnxruntime-qnn`). `FaceBlurrer` raises an error if the device is missing | |
+| `--precision fp32\|a16w8` | `FaceBlurrer(precision=)` | `fp32` | Which build of the model runs (not for yunet). `a16w8` is quantized for the Qualcomm NPU; it also runs on `cpu` and `gpu`. In `tools/blur_live.py` it is `--npu-precision` | `a16w8`: faster on the NPU, close to fp32 |
 
 ### Blur (mask) and display
 
