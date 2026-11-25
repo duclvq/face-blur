@@ -146,9 +146,9 @@ def main():
                     help="blur the whole box or an oval that follows the face")
     ap.add_argument("--device", choices=["cpu", "gpu", "npu"], default="cpu",
                     help="where the detector runs: cpu (default), gpu (NVIDIA, needs onnxruntime-gpu) or npu (Qualcomm, needs onnxruntime-qnn)")
-    ap.add_argument("--precision", choices=["fp32", "a16w8"], default=None,
-                    help="which build of the model: fp32 (default) or a16w8 (quantized, for the "
-                         "Qualcomm NPU). Not for yunet")
+    ap.add_argument("--precision", choices=["fp32", "a16w8", "a8w8"], default=None,
+                    help="which build of the model: fp32 (default), a16w8 or a8w8 (quantized, for the "
+                         "Qualcomm NPU; a8w8 also runs on older Hexagons). Not for yunet")
     args = ap.parse_args()
     if not 0 <= args.pad <= 1:
         ap.error(f"--pad is a fraction of the face size between 0 and 1, not pixels "

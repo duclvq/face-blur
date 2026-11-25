@@ -98,7 +98,7 @@ python tools/blur_images.py photos/ photos_blurred/   # a whole folder (same opt
 
 Time per frame on: Mac mini M4 (CPU, whole pipeline) · Qualcomm Dragonwing IQ-9075 EVK · QCS8550 · Snapdragon X Elite CRD · Dragonwing RB3 Gen 2 Vision Kit (QCS6490, 8-bit models). Qualcomm devices: detector on the NPU (`--device npu`), via [Qualcomm AI Hub](https://aihub.qualcomm.com).
 
-RB3 Gen 2 runs only 8-bit (w8a8) models on its NPU, about 30x faster than its CPU (yolo11n_1280: 475 ms → 18 ms). The 8-bit models lose a little accuracy (faces left unblurred on 16 street frames, float on CPU → w8a8 on the RB3 NPU): yolo11n_1280 10.8% → 12.0%, yolo11n_640 22.9% → 26.5%, face_det_lite 51.8% → 53.0%. On the other devices the NPU matches the CPU. The repo has the 16-bit (a16w8) builds, not the 8-bit ones; [docs/hexagon.md](docs/hexagon.md#quantized-builds) lists them.
+RB3 Gen 2 runs only 8-bit (w8a8) models on its NPU, about 30x faster than its CPU (yolo11n_1280: 475 ms → 18 ms). The 8-bit models lose a little accuracy (faces left unblurred on 16 street frames, float on CPU → w8a8 on the RB3 NPU): yolo11n_1280 10.8% → 12.0%, yolo11n_640 22.9% → 26.5%, face_det_lite 51.8% → 53.0%. On the other devices the NPU matches the CPU. The 8-bit models and the RB3 Gen 2 DLCs are in `models/`; [docs/hexagon.md](docs/hexagon.md#quantized-and-compiled-builds) lists them.
 
 NVIDIA GPU (`--device gpu`, onnxruntime-gpu 1.32), `yolo11n_640` on 1080p frames: on an RTX 5060 Ti the detector takes 8.2 ms and the whole frame (`put()`, 30-frame delay) 10.7 ms, against 16.3 ms and 18.5 ms on the same PC's 16-core CPU (medians of 3 alternating runs of 200 frames each).
 
@@ -121,7 +121,7 @@ The same options exist on the command line (`quickstart.py`, `tools/`) and in Py
 | `--min-size PX` | `FaceBlurrer(min_size=)` | `0` (`24` for yunet) | Skip faces smaller than PX pixels | Fewer false small faces, misses distant ones |
 | `--low-score S` | `fb.stream(low_score=)` | `0.1` | ByteTrack second stage: detections between this and the threshold keep a known face tracked | `0` turns it off |
 | `--device cpu\|gpu\|npu` | `FaceBlurrer(device=)` | `cpu` | Where the detector runs: `cpu`, `gpu` (NVIDIA, needs `pip install onnxruntime-gpu[cuda,cudnn]`) or `npu` (Qualcomm, needs `onnxruntime-qnn`). `FaceBlurrer` raises an error if the device is missing | |
-| `--precision fp32\|a16w8` | `FaceBlurrer(precision=)` | `fp32` | Which build of the model runs (not for yunet). `a16w8` is quantized for the Qualcomm NPU; it also runs on `cpu` and `gpu`. In `tools/blur_live.py` it is `--npu-precision` | `a16w8`: faster on the NPU, close to fp32 |
+| `--precision fp32\|a16w8\|a8w8` | `FaceBlurrer(precision=)` | `fp32` | Which build of the model runs (not for yunet). `a16w8` and `a8w8` are quantized for the Qualcomm NPU; they also run on `cpu` and `gpu`. In `tools/blur_live.py` it is `--npu-precision` | `a8w8`: the only one the RB3 Gen 2 NPU runs; misses more small faces |
 
 ### Blur (mask) and display
 

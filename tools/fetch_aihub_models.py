@@ -8,9 +8,10 @@ NPU times and accuracy are in README.md and docs/hexagon.md). Needs
     python tools/fetch_aihub_models.py --force    # overwrite existing files
 
 Quantize jobs give a QDQ ONNX with its weights in a separate file; it is saved
-here as one .onnx file.
+here as one .onnx file. Compile jobs for the RB3 Gen 2 (QCS6490) give a QNN DLC.
 """
 import argparse
+import shutil
 import tempfile
 import zipfile
 from pathlib import Path
@@ -18,9 +19,15 @@ from pathlib import Path
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 
 JOBS = {
+    "yolo11n_face/yolo11n_face_640x384_a8w8.onnx": "jprmexkvg",
+    "yolo11n_face/yolo11n_face_1280x736_a8w8.onnx": "jp2qlo8xp",
     "yolo11n_face/yolo11n_face_640x384_a16w8.onnx": "jpe0kvn0g",
     "yolo11n_face/yolo11n_face_1280x736_a16w8.onnx": "jp3lemlzp",
+    "yolo11n_face/qcs6490/yolo11n_face_640x384_a8w8.dlc": "jp8dzjoz5",
+    "yolo11n_face/qcs6490/yolo11n_face_1280x736_a8w8.dlc": "jgkw36zyg",
+    "face_det_lite/face_det_lite_a8w8.onnx": "jp08lo905",
     "face_det_lite/face_det_lite_a16w8.onnx": "jg97w42v5",
+    "face_det_lite/qcs6490/face_det_lite_a8w8.dlc": "jgzqrzy4g",
 }
 
 
@@ -38,7 +45,10 @@ def fetch(rel_path, job_id):
     dest.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
         downloaded = Path(hub.get_job(job_id).get_target_model().download(str(Path(tmp) / "model")))
-        save_single_onnx(downloaded, dest)
+        if dest.suffix == ".onnx":
+            save_single_onnx(downloaded, dest)
+        else:
+            shutil.copyfile(downloaded, dest)
     print(f"{rel_path} <- {job_id} ({dest.stat().st_size / 1e6:.1f} MB)")
 
 

@@ -28,31 +28,46 @@ threshold 0.55 and NMS 0.2 as in Qualcomm's evaluator.
 
 AI Hub reports 1-3 ms per inference on the NPU for this float model on recent
 Snapdragons (8 Gen 3, X Elite, QCS8550); there is no float build listed for
-QCS6490-class chips (no fp16 HTP), use `--npu yunet --npu-precision a8w8` there.
+QCS6490-class chips (no fp16 HTP), use `--precision a8w8` there.
 
 Against full-resolution YuNet on the street clip (CPU EP), it matched 85% of
 YuNet's faces at 360p and 79% at 1080p (94% of faces >= 72 px at 1080p):
 small faces are lost by the 640-px input.
 
-## Quantized builds
+## Quantized and compiled builds
 
-Qualcomm AI Hub made these a16w8 builds from the float models (quantize jobs
-of 2026-11-23). `python tools/fetch_aihub_models.py` downloads them again;
+Qualcomm AI Hub made these files from the float models (quantize and compile
+jobs of 2026-11-23). `python tools/fetch_aihub_models.py` downloads them again;
 the job of each file is in that script.
 
 | File | Format | NPU time per inference |
 |---|---|---|
 | `yolo11n_face/yolo11n_face_640x384_a16w8.onnx` | QDQ ONNX | IQ-9075 3.5 ms, QCS8550 3.3 ms, X Elite 3.2 ms |
 | `yolo11n_face/yolo11n_face_1280x736_a16w8.onnx` | QDQ ONNX | IQ-9075 12.1 ms, QCS8550 11.6 ms, X Elite 12.4 ms |
+| `yolo11n_face/yolo11n_face_640x384_a8w8.onnx` | QDQ ONNX, scores split from boxes | |
+| `yolo11n_face/yolo11n_face_1280x736_a8w8.onnx` | QDQ ONNX, scores split from boxes | |
+| `yolo11n_face/qcs6490/yolo11n_face_640x384_a8w8.dlc` | QNN DLC for RB3 Gen 2 | RB3 Gen 2 3.2 ms |
+| `yolo11n_face/qcs6490/yolo11n_face_1280x736_a8w8.dlc` | QNN DLC for RB3 Gen 2 | RB3 Gen 2 18.2 ms |
 | `face_det_lite/face_det_lite_a16w8.onnx` | QDQ ONNX | IQ-9075 2.0 ms, QCS8550 1.8 ms, X Elite 1.9 ms |
+| `face_det_lite/face_det_lite_a8w8.onnx` | QDQ ONNX | |
+| `face_det_lite/qcs6490/face_det_lite_a8w8.dlc` | QNN DLC for RB3 Gen 2 | RB3 Gen 2 1.4 ms |
 
+- The a8w8 YOLO models output boxes, scores and keypoints as three tensors
+  (`a_boxes`, `b_scores`, `c_kpts`). In one 8-bit tensor, the box coordinates
+  (0 to 1280) leave too few steps for the scores (0 to 1).
+- Each DLC is the a8w8 ONNX above it, compiled for the QCS6490 HTP. Native
+  QAIRT apps (`qnn-net-run`, SNPE) load it; the Python code does not.
 - The RB3 Gen 2 runs only 8-bit models on its NPU. The a16w8 models fall back
-  to its CPU there (93 to 750 ms).
-- `--precision a16w8` (`FaceBlurrer(precision=)`) picks these ONNX files
-  instead of the float one, for `yolo11n_640`, `yolo11n_1280` and
+  to its CPU (93 to 750 ms).
+- `--precision a16w8` or `a8w8` (`FaceBlurrer(precision=)`) picks these ONNX
+  files instead of the float one, for `yolo11n_640`, `yolo11n_1280` and
   `face_det_lite`. They run on any device.
+- The a8w8 YOLO boxes are 8-bit over the whole input width: one step is 2.5 px
+  at 640x384 and 5 px at 1280x736. Faces about 10 px wide in the model input
+  come out with loose boxes, and NMS keeps some duplicates.
 - On the CPU EP, the mean score difference from the float model on faces the
-  float model finds is below 0.01 (`examples/input`).
+  float model finds is 0.025 for a8w8 YOLO, 0.015 for a8w8 face_det_lite and
+  below 0.01 for a16w8 (`examples/input`).
 
 ## YuNet (quantized, fixed sizes)
 
@@ -99,11 +114,11 @@ python tools/blur_live.py 0 --show --model face_det_lite --device npu   # face_d
 python tools/blur_live.py 0 --show --npu                      # the same
 python tools/blur_live.py 0 --show --npu yunet               # YuNet 960x544 a16w8
 python tools/blur_live.py in.mp4 --show --npu yunet:640x384 --npu-precision a8w8
-python quickstart.py --input in.mp4 --device npu --precision a16w8  # yolo11n_640 a16w8
+python quickstart.py --input in.mp4 --device npu --precision a8w8   # yolo11n_640 a8w8, for the RB3 Gen 2
 ```
 
 From code: `FaceBlurrer(model="face_det_lite", device="npu")`,
-`FaceBlurrer(device="npu", precision="a16w8")`, `detector.use_npu("face_det_lite")`,
+`FaceBlurrer(device="npu", precision="a8w8")`, `detector.use_npu("face_det_lite")`,
 `detector.use_npu("yunet", (960, 544), "a16w8")`, or `hexagon.QnnFaceDetLite` /
 `hexagon.QnnYuNet`.
 

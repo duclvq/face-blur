@@ -124,8 +124,8 @@ def main():
                          "--model already runs on the NPU when onnxruntime-qnn is installed. "
                          "See docs/hexagon.md")
     ap.add_argument("--npu-precision", choices=["a8w8", "a16w8", "fp32"], default=None,
-                    help="which build of the model: fp32 (run as fp16 on the NPU) or a16w8; "
-                         "a8w8 (older Hexagon) for --npu yunet only. Default: fp32, a16w8 for --npu yunet")
+                    help="which build of the model: fp32 (run as fp16 on the NPU), a16w8 or a8w8 "
+                         "(older Hexagon). Default: fp32, a16w8 for --npu yunet")
     ap.add_argument("--npu-allow-cpu", action="store_true", help=argparse.SUPPRESS)  # test w/o QNN
     ap.add_argument("--boxes-json", help=argparse.SUPPRESS)  # per-frame boxes, for evaluation
     o = ap.parse_args()
